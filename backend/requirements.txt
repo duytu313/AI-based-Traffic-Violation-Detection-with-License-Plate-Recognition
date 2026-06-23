@@ -1,0 +1,18 @@
+# Backend requirements for Traffic AI
+# Run: pip install -r requirements.txt
+
+# Core
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+pydantic>=2.0.0
+
+# AI/ML
+ultralytics>=8.0.0
+opencv-python>=4.8.0
+fast-plate-ocr>=0.0.10
+
+# Utils
+numpy>=1.24.0
+pillow>=10.0.0
+requests>=2.31.0
