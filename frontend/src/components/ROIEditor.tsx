@@ -139,7 +139,7 @@ export default function ROIEditor({ imageUrl, onSave, onCancel, initialPoints = 
   if (!imageUrl) {
     return (
       <div className="p-4 bg-slate-800 rounded-lg text-center text-slate-400">
-        Vui lòng mở camera/webcam trước để vẽ vùng vi phạm
+        Please open camera/webcam first to draw violation zone
       </div>
     );
   }
@@ -148,14 +148,14 @@ export default function ROIEditor({ imageUrl, onSave, onCancel, initialPoints = 
     <div className="space-y-4">
       <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
         <h3 className="text-sm font-medium text-blue-300 mb-2">
-          🎯 Công cụ vẽ vùng vi phạm (ROI Editor)
+          🎯 Violation Zone Drawing Tool (ROI Editor)
         </h3>
         <ul className="text-xs text-slate-400 space-y-1">
-          <li>• Click chuột để thêm điểm vùng vi phạm</li>
-          <li>• Nhấn <strong>Enter</strong> để hoàn thành vùng</li>
-          <li>• Nhấn <strong>Backspace</strong> để xóa điểm cuối</li>
-          <li>• Nhấn <strong>Esc</strong> để hủy/hủy điểm cuối</li>
-          <li>• Cần tối thiểu 3 điểm để tạo vùng</li>
+          <li>• Click to add violation zone points</li>
+          <li>• Press <strong>Enter</strong> to complete zone</li>
+          <li>• Press <strong>Backspace</strong> to remove last point</li>
+          <li>• Press <strong>Esc</strong> to cancel/remove last point</li>
+          <li>• Need at least 3 points to create zone</li>
         </ul>
       </div>
 
@@ -172,9 +172,9 @@ export default function ROIEditor({ imageUrl, onSave, onCancel, initialPoints = 
 
       <div className="flex items-center justify-between">
         <div className="text-sm text-slate-400">
-          Số điểm: <span className="text-white font-medium">{points.length}</span>
+          Points: <span className="text-white font-medium">{points.length}</span>
           {isComplete && (
-            <span className="ml-2 text-green-400">✓ Hoàn thành</span>
+            <span className="ml-2 text-green-400">✓ Complete</span>
           )}
         </div>
 
@@ -184,20 +184,20 @@ export default function ROIEditor({ imageUrl, onSave, onCancel, initialPoints = 
             disabled={points.length === 0}
             className="px-4 py-2 bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500 text-white rounded-lg text-sm transition-colors"
           >
-            Xóa tất cả
+            Clear All
           </button>
           <button
             onClick={onCancel}
             className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-sm transition-colors"
           >
-            Hủy
+            Cancel
           </button>
           <button
             onClick={handleSave}
             disabled={!isComplete}
             className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-800 disabled:text-slate-500 text-white rounded-lg text-sm transition-colors"
           >
-            Lưu vùng
+            Save Zone
           </button>
         </div>
       </div>

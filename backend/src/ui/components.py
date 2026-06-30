@@ -1,5 +1,5 @@
 """
-UI Components - Các hàm vẽ UI Streamlit, sidebar, display cards
+UI Components - Streamlit UI functions, sidebar, display cards
 """
 import streamlit as st
 import cv2
@@ -9,27 +9,27 @@ from typing import List, Tuple, Optional
 
 
 def show_traffic_light_summary(recognizer, traffic_lights, red_light_violations):
-    """Hiển thị tóm tắt trạng thái đèn giao thông."""
-    active_light = "Đỏ" if recognizer.red_light_is_active(traffic_lights) else "Không đỏ"
-    st.write(f"🚦 Trạng thái đèn: **{active_light}**")
+    """Display traffic light status summary."""
+    active_light = "Red" if recognizer.red_light_is_active(traffic_lights) else "Not red"
+    st.write(f"🚦 Light status: **{active_light}**")
     if traffic_lights:
-        st.caption("Đèn phát hiện: " + ", ".join(
+        st.caption("Detected lights: " + ", ".join(
             f"{light['class_name']} → {light['state']} ({light['conf']*100:.1f}%)"
             for light in traffic_lights
         ))
     if red_light_violations:
-        st.error(f"🚨 **Phát hiện {len(red_light_violations)} đối tượng vượt đèn đỏ!**")
+        st.error(f"🚨 **Detected {len(red_light_violations)} red light violations!**")
         for item in red_light_violations:
             st.write(f"- {item['class_name']} ({item['conf']*100:.1f}%): {item['details']}")
     elif traffic_lights:
-        st.success("Không phát hiện vượt đèn đỏ.")
+        st.success("No red light violations detected.")
     else:
-        st.info("Chưa phát hiện đèn giao thông.")
+        st.info("No traffic lights detected.")
 
 
 def display_vehicle_card(vehicle_img, plate_img, plate_text, color, vtype, idx=0):
-    """Hiển thị thông tin 1 xe (ảnh xe + biển số)."""
-    caption = f"Xe {idx + 1}: {color} {vtype}"
+    """Display information for 1 vehicle (vehicle image + license plate)."""
+    caption = f"Vehicle {idx + 1}: {color} {vtype}"
     col_a, col_b = st.columns(2)
     with col_a:
         st.image(cv2.cvtColor(vehicle_img, cv2.COLOR_BGR2RGB),
@@ -37,13 +37,13 @@ def display_vehicle_card(vehicle_img, plate_img, plate_text, color, vtype, idx=0
     with col_b:
         if plate_img is not None:
             st.image(cv2.cvtColor(plate_img, cv2.COLOR_BGR2RGB),
-                     caption=f"Biển số: {plate_text}", use_container_width=True)
+                     caption=f"License plate: {plate_text}", use_container_width=True)
         else:
-            st.write("Không có biển số")
+            st.write("No license plate")
 
 
 def display_violation_detail(recognizer, violations):
-    """Hiển thị chi tiết các vi phạm của 1 xe."""
+    """Display violation details for 1 vehicle."""
     for vtype_v, details, _, conf in violations:
         icon = recognizer.get_violation_icon(vtype_v)
         st.error(f"{icon} {details} ({conf*100:.1f}%)")
@@ -51,49 +51,49 @@ def display_violation_detail(recognizer, violations):
 
 def render_sidebar_controls(recognizer):
     """
-    Render các control ở sidebar.
-    Trả về dict chứa các giá trị cấu hình người dùng đã chọn.
+    Render sidebar controls.
+    Returns dict containing user-selected configuration values.
     """
-    st.sidebar.header("Chế độ")
-    mode = st.sidebar.radio("Chọn chế độ", ("Image Upload", "Video Upload", "Webcam (local)", "RTSP / IP Camera"))
+    st.sidebar.header("Mode")
+    mode = st.sidebar.radio("Select mode", ("Image Upload", "Video Upload", "Webcam (local)", "RTSP / IP Camera"))
 
-    display_fps = st.sidebar.checkbox("Hiển thị FPS", value=True)
-    show_boxes = st.sidebar.checkbox("Hiển thị khung xe và biển số", value=True)
-    max_items = st.sidebar.slider("Số xe tối đa hiển thị mỗi lần", 1, 10, 1)
-    process_every_n_frame = st.sidebar.slider("Xử lý mỗi N frame (video)", 1, 30, 5)
+    display_fps = st.sidebar.checkbox("Display FPS", value=True)
+    show_boxes = st.sidebar.checkbox("Display vehicle and plate boxes", value=True)
+    max_items = st.sidebar.slider("Maximum vehicles to display per frame", 1, 10, 1)
+    process_every_n_frame = st.sidebar.slider("Process every N frames (video)", 1, 30, 5)
 
-    # --- Cấu hình phát hiện vi phạm ---
-    st.sidebar.header("⚠️ Phát hiện vi phạm")
-    enable_violation_detection = st.sidebar.checkbox("Bật phát hiện vi phạm", value=True)
-    violation_conf_limit = st.sidebar.slider("Ngưỡng độ tin cậy vi phạm (%)", 10, 90, 15, 5)
+    # --- Violation detection configuration ---
+    st.sidebar.header("⚠️ Violation Detection")
+    enable_violation_detection = st.sidebar.checkbox("Enable violation detection", value=True)
+    violation_conf_limit = st.sidebar.slider("Violation confidence threshold (%)", 10, 90, 15, 5)
     recognizer.set_violation_conf_limit(violation_conf_limit / 100.0)
-    conf_more_than_two = st.sidebar.slider("Ngưỡng chở quá 2 người (%)", 10, 90, 50, 5)
-    conf_no_helmet = st.sidebar.slider("Ngưỡng không mũ bảo hiểm (%)", 10, 90, 15, 5)
-    conf_using_mobile = st.sidebar.slider("Ngưỡng sử dụng điện thoại (%)", 10, 90, 15, 5)
+    conf_more_than_two = st.sidebar.slider("More than 2 people threshold (%)", 10, 90, 50, 5)
+    conf_no_helmet = st.sidebar.slider("No helmet threshold (%)", 10, 90, 15, 5)
+    conf_using_mobile = st.sidebar.slider("Phone usage threshold (%)", 10, 90, 15, 5)
     recognizer.violation_conf_more_than_two = conf_more_than_two / 100.0
     recognizer.violation_conf_without_helmet = conf_no_helmet / 100.0
     recognizer.violation_conf_using_mobile = conf_using_mobile / 100.0
 
-    st.sidebar.header("🚦 Vượt đèn đỏ")
-    enable_red_light_detection = st.sidebar.checkbox("Bật phát hiện vượt đèn đỏ", value=False)
-    traffic_light_conf = st.sidebar.slider("Ngưỡng nhận dạng đèn/người/xe (%)", 10, 90, 25, 5)
+    st.sidebar.header("🚦 Red Light Running")
+    enable_red_light_detection = st.sidebar.checkbox("Enable red light running detection", value=False)
+    traffic_light_conf = st.sidebar.slider("Light/person/vehicle detection threshold (%)", 10, 90, 25, 5)
     recognizer.set_traffic_light_conf(traffic_light_conf / 100.0)
-    st.sidebar.caption("Vượt đèn đỏ được phát hiện khi xe nằm trong vùng ROI được vẽ thủ công.")
+    st.sidebar.caption("Red light running is detected when vehicle is inside the manually drawn ROI zone.")
 
-    debug_vehicle = st.sidebar.checkbox("🔍 Debug phát hiện vi phạm", value=False)
+    debug_vehicle = st.sidebar.checkbox("🔍 Debug violation detection", value=False)
 
-    # --- Cấu hình Telegram ---
-    st.sidebar.subheader("🤖 Thông báo Telegram")
-    enable_telegram = st.sidebar.checkbox("Gửi thông báo Telegram khi phát hiện xe mới", value=True)
-    enable_violation_telegram = st.sidebar.checkbox("Gửi thông báo vi phạm Telegram", value=True)
+    # --- Telegram configuration ---
+    st.sidebar.subheader("🤖 Telegram Notifications")
+    enable_telegram = st.sidebar.checkbox("Send Telegram notification when new vehicle detected", value=True)
+    enable_violation_telegram = st.sidebar.checkbox("Send Telegram violation notification", value=True)
 
-    from src.utils.notifications import send_test_telegram
-    if st.sidebar.button("📨 Gửi tin nhắn test"):
+    from backend.src.utils.notifications import send_test_telegram
+    if st.sidebar.button("📨 Send test message"):
         success, msg = send_test_telegram()
         if success:
             st.sidebar.success(msg)
         else:
-            st.sidebar.error(f"Lỗi: {msg}")
+            st.sidebar.error(f"Error: {msg}")
 
     return {
         "mode": mode,

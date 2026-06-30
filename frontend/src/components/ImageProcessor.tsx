@@ -9,12 +9,14 @@ import ConfigPanel from "./ConfigPanel";
 const defaultConfig: Config = {
   enable_violation_detection: true,
   enable_red_light_detection: false,
+  enable_bev_detection: true,
   violation_conf_limit: 0.15,
   conf_more_than_two: 0.50,
   conf_no_helmet: 0.15,
   conf_using_mobile: 0.15,
   traffic_light_conf: 0.25,
   show_zones: false,
+  show_bev: true,
   camera_direction: "down",
 };
 
@@ -78,7 +80,7 @@ export default function ImageProcessor() {
       const res = await processImage(file, config);
       setResult(res);
     } catch (err: any) {
-      setError(err?.response?.data?.detail || err?.message || "Lỗi xử lý ảnh");
+      setError(err?.response?.data?.detail || err?.message || "Image processing error");
     } finally {
       setLoading(false);
     }
@@ -129,10 +131,10 @@ export default function ImageProcessor() {
               </div>
               <div>
                 <p className="text-lg font-medium text-white">
-                  Kéo thả ảnh vào đây
+                  Drag and drop image here
                 </p>
                 <p className="text-sm text-slate-400 mt-1">
-                  hoặc click để chọn file (JPG, PNG)
+                  or click to select file (JPG, PNG)
                 </p>
               </div>
             </div>
@@ -145,7 +147,7 @@ export default function ImageProcessor() {
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-semibold text-white flex items-center gap-2">
                 <ImageIcon className="w-4 h-4" />
-                Ảnh đầu vào
+                Input Image
               </h3>
               <button
                 onClick={reset}
@@ -168,12 +170,12 @@ export default function ImageProcessor() {
                 {loading ? (
                   <>
                     <div className="spinner w-4 h-4" />
-                    Đang xử lý...
+                    Processing...
                   </>
                 ) : (
                   <>
                     <ImageIcon className="w-4 h-4" />
-                    Xử lý ảnh
+                    Process Image
                   </>
                 )}
               </button>
@@ -182,7 +184,7 @@ export default function ImageProcessor() {
                 disabled={loading}
                 className="px-4 py-2.5 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-medium transition-colors"
               >
-                Chọn ảnh khác
+                Choose Another Image
               </button>
             </div>
           </div>
@@ -201,9 +203,9 @@ export default function ImageProcessor() {
           <div className="processing-overlay">
             <div className="card text-center space-y-4">
               <div className="spinner mx-auto" />
-              <p className="text-white font-medium">Đang xử lý ảnh...</p>
+              <p className="text-white font-medium">Processing image...</p>
               <p className="text-sm text-slate-400">
-                Hệ thống đang phát hiện phương tiện, biển số và vi phạm
+                System is detecting vehicles, license plates, and violations
               </p>
             </div>
           </div>
@@ -218,25 +220,25 @@ export default function ImageProcessor() {
                 <p className="text-2xl font-bold text-blue-400">
                   {result.stats.total_vehicles}
                 </p>
-                <p className="text-xs text-slate-400 mt-1">Phương tiện</p>
+                <p className="text-xs text-slate-400 mt-1">Vehicles</p>
               </div>
               <div className="card text-center">
                 <p className="text-2xl font-bold text-red-400">
                   {result.stats.total_violations}
                 </p>
-                <p className="text-xs text-slate-400 mt-1">Vi phạm</p>
+                <p className="text-xs text-slate-400 mt-1">Violations</p>
               </div>
               <div className="card text-center">
                 <p className="text-2xl font-bold text-yellow-400">
                   {result.stats.total_red_light}
                 </p>
-                <p className="text-xs text-slate-400 mt-1">Vượt đèn đỏ</p>
+                <p className="text-xs text-slate-400 mt-1">Red Light Violations</p>
               </div>
             </div>
 
             {/* Result Image */}
             <div className="card">
-              <h3 className="font-semibold text-white mb-4">Kết quả xử lý</h3>
+              <h3 className="font-semibold text-white mb-4">Processing Results</h3>
               <img
                 src={`data:image/jpeg;base64,${result.image_base64}`}
                 alt="Result"
@@ -249,7 +251,7 @@ export default function ImageProcessor() {
               <div className="card">
                 <h3 className="font-semibold text-white mb-4 flex items-center gap-2">
                   <AlertTriangle className="w-4 h-4 text-red-400" />
-                  Chi tiết vi phạm
+                  Violation Details
                 </h3>
                 <div className="space-y-4">
                   {result.violations.map((v, i) => (
@@ -292,7 +294,7 @@ export default function ImageProcessor() {
               <div className="card">
                 <h3 className="font-semibold text-white mb-4 flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 text-green-400" />
-                  Biển số đã nhận dạng
+                  Recognized License Plates
                 </h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {result.matched_plates.map((p, i) => (
@@ -319,7 +321,7 @@ export default function ImageProcessor() {
               <div className="p-4 bg-green-500/10 border border-green-500/20 rounded-lg flex items-center gap-3">
                 <CheckCircle2 className="w-5 h-5 text-green-400" />
                 <p className="text-green-300 text-sm">
-                  ✅ Không phát hiện vi phạm. Tất cả phương tiện đều tuân thủ luật giao thông.
+                   ✅ No violations detected. All vehicles are complying with traffic laws.
                 </p>
               </div>
             )}

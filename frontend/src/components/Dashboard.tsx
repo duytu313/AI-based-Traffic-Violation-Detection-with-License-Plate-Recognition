@@ -27,21 +27,21 @@ export default function Dashboard() {
 
   const cards = [
     {
-      label: "Tổng phương tiện",
+      label: "Total Vehicles",
       value: stats?.total_vehicles ?? 0,
       icon: Car,
       color: "text-blue-400",
       bg: "bg-blue-500/10",
     },
     {
-      label: "Cảnh báo gian lận",
+      label: "Fraud Alerts",
       value: stats?.fraud_alerts ?? 0,
       icon: Shield,
       color: "text-yellow-400",
       bg: "bg-yellow-500/10",
     },
     {
-      label: "Vi phạm",
+      label: "Violations",
       value: stats?.total_violations ?? 0,
       icon: AlertTriangle,
       color: "text-red-400",
@@ -59,10 +59,10 @@ export default function Dashboard() {
           </div>
           <div>
             <h2 className="text-xl font-bold text-white">
-              Bảng điều khiển
+              Dashboard
             </h2>
             <p className="text-sm text-slate-400 mt-1">
-              Tổng quan về hệ thống quản lý giao thông thông minh
+              Overview of the smart traffic management system
             </p>
           </div>
         </div>
@@ -98,23 +98,23 @@ export default function Dashboard() {
       {/* Info */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="card">
-          <h3 className="font-semibold text-white mb-3">🚀 Hướng dẫn sử dụng</h3>
+          <h3 className="font-semibold text-white mb-3">🚀 User Guide</h3>
           <ol className="space-y-2 text-sm text-slate-300">
-            <li>1. Chọn tab <strong>Xử lý ảnh</strong> để tải ảnh lên và phân tích</li>
-            <li>2. Chọn tab <strong>Xử lý video</strong> để phân tích video</li>
-            <li>3. Chọn tab <strong>Cơ sở dữ liệu</strong> để xem lịch sử</li>
-            <li>4. Điều chỉnh ngưỡng phát hiện ở tab <strong>Cấu hình</strong></li>
+            <li>1. Select <strong>Image Processing</strong> tab to upload and analyze images</li>
+            <li>2. Select <strong>Video Processing</strong> tab to analyze videos</li>
+            <li>3. Select <strong>Database</strong> tab to view history</li>
+            <li>4. Adjust detection thresholds in the <strong>Configuration</strong> tab</li>
           </ol>
         </div>
         <div className="card">
-          <h3 className="font-semibold text-white mb-3">⚡ Tính năng</h3>
+          <h3 className="font-semibold text-white mb-3">⚡ Features</h3>
           <ul className="space-y-2 text-sm text-slate-300">
-            <li>✅ Phát hiện phương tiện (ô tô, xe máy, xe buýt, xe tải)</li>
-            <li>✅ Nhận dạng biển số xe tự động (ANPR)</li>
-            <li>✅ Phát hiện vi phạm: không mũ BH, chở quá 2 người, dùng điện thoại</li>
-            <li>✅ Phát hiện vượt đèn đỏ</li>
-            <li>✅ Thông báo Telegram</li>
-            <li>✅ Lưu trữ cơ sở dữ liệu</li>
+            <li>✅ Vehicle detection (cars, motorcycles, buses, trucks)</li>
+            <li>✅ Automatic license plate recognition (ANPR)</li>
+            <li>✅ Violation detection: no helmet, carrying more than 2 people, using phone</li>
+            <li>✅ Red light violation detection</li>
+            <li>✅ Telegram notifications</li>
+            <li>✅ Database storage</li>
           </ul>
         </div>
       </div>

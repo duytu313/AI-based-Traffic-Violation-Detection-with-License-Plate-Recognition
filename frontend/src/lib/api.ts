@@ -22,12 +22,14 @@ export async function processImage(file: File, config: Config): Promise<ProcessI
   formData.append("file", file);
   formData.append("enable_violation_detection", String(config.enable_violation_detection));
   formData.append("enable_red_light_detection", String(config.enable_red_light_detection));
+  formData.append("enable_bev_detection", String(config.enable_bev_detection));
   formData.append("violation_conf_limit", String(config.violation_conf_limit));
   formData.append("conf_more_than_two", String(config.conf_more_than_two));
   formData.append("conf_no_helmet", String(config.conf_no_helmet));
   formData.append("conf_using_mobile", String(config.conf_using_mobile));
   formData.append("traffic_light_conf", String(config.traffic_light_conf));
   formData.append("show_zones", String(config.show_zones));
+  formData.append("show_bev", String(config.show_bev));
   formData.append("camera_direction", config.camera_direction);
   const res = await api.post("/api/process-image", formData);
   return res.data;
@@ -405,6 +407,31 @@ export async function detectROIViolations(
     vehicles,
     red_light_active: redLightActive,
   });
+  return res.data;
+}
+
+// ======================== BEV (BIRD'S EYE VIEW) API ========================
+
+export async function setBEVConfig(srcPoints: { x: number; y: number }[], dstPoints?: { x: number; y: number }[], stopLineY?: number): Promise<any> {
+  const body: any = { src_points: srcPoints };
+  if (dstPoints) body.dst_points = dstPoints;
+  if (stopLineY !== undefined) body.stop_line_3d_y = stopLineY;
+  try {
+    const res = await api.post("/api/bev/config", body);
+    return res.data;
+  } catch {
+    // Backend unavailable - silently fail
+    return null;
+  }
+}
+
+export async function getBEVConfig(): Promise<any> {
+  const res = await api.get("/api/bev/config");
+  return res.data;
+}
+
+export async function resetBEV(): Promise<any> {
+  const res = await api.post("/api/bev/reset");
   return res.data;
 }
 

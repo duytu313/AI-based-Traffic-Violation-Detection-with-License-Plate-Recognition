@@ -20,7 +20,7 @@ export default function Header({ isConnected }: HeaderProps) {
               <h1 className="text-lg font-bold text-white leading-tight">
                 Traffic AI
               </h1>
-              <p className="text-xs text-slate-400">Hệ thống quản lý giao thông thông minh</p>
+              <p className="text-xs text-slate-400">Smart Traffic Management System</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -39,7 +39,7 @@ export default function Header({ isConnected }: HeaderProps) {
                     isConnected ? "bg-green-400" : "bg-red-400"
                   }`}
                 />
-                {isConnected ? "Kết nối" : "Mất kết nối"}
+                {isConnected ? "Connected" : "Disconnected"}
               </span>
             </div>
           </div>

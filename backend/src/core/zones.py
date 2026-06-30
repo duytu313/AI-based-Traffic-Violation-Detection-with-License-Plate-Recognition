@@ -1,23 +1,23 @@
 """
 Red Light Zone Detector
-Phát hiện vượt đèn đỏ dựa trên vùng (zone-based) thay vì đường (line-based).
+Detects red light violations based on zones (zone-based) instead of lines (line-based).
 
-Sơ đồ các vùng:
+Zone diagram:
 
       Camera
 ┌─────────────────┐
-│  Waiting Zone   │  - Khu vực chờ đèn (trước vạch dừng)
+│  Waiting Zone   │  - Waiting area (before stop line)
 ├─────────────────┤
-│   Stop Zone     │  - Khu vực vạch dừng (critical zone)
+│   Stop Zone     │  - Stop line area (critical zone)
 ├─────────────────┤
-│ Intersection    │  - Khu vực giao lộ (đã qua vạch dừng)
+│ Intersection    │  - Intersection area (past stop line)
 └─────────────────┘
 
-Logic phát hiện vi phạm:
-  - Khi đèn đỏ:
-    * Xe đi từ Waiting → Stop → Intersection => VI PHẠM
-    * Xe đứng yên trong Waiting => OK (chờ đúng)
-    * Xe đã ở trong Intersection khi đèn chuyển đỏ => OK (đang thoát giao lộ)
+Violation detection logic:
+  - When red light:
+    * Vehicle goes Waiting → Stop → Intersection => VIOLATION
+    * Vehicle stops in Waiting => OK (waiting correctly)
+    * Vehicle already in Intersection when light turns red => OK (exiting intersection)
 """
 import cv2
 import numpy as np
@@ -28,41 +28,41 @@ from dataclasses import dataclass, field
 @dataclass
 class ZoneConfig:
     """
-    Cấu hình các vùng theo tọa độ Y (dọc theo chiều di chuyển của xe).
+    Zone configuration based on Y coordinates (along vehicle movement direction).
     
-    direction: hướng camera
-      - "down": camera nhìn từ trên xuống (top-down), xe đi từ Y nhỏ -> Y lớn
-      - "up": camera nhìn từ đằng sau (rear-view), xe đi từ Y lớn -> Y nhỏ
+    direction: camera direction
+      - "down": camera looks from top-down, vehicle moves from small Y to large Y
+      - "up": camera looks from rear-view, vehicle moves from large Y to small Y
     """
     direction: str = "down"       # "down" = top-down, "up" = rear-view
-    waiting_start: int = 0        # Y bắt đầu vùng chờ
-    waiting_end: int = 200        # Y kết thúc vùng chờ
-    stop_start: int = 200         # Y bắt đầu vùng vạch dừng
-    stop_end: int = 300           # Y kết thúc vùng vạch dừng
-    intersection_start: int = 300 # Y bắt đầu vùng giao lộ
-    intersection_end: int = 500   # Y kết thúc vùng giao lộ
+    waiting_start: int = 0        # Y start of waiting zone
+    waiting_end: int = 200        # Y end of waiting zone
+    stop_start: int = 200         # Y start of stop zone
+    stop_end: int = 300           # Y end of stop zone
+    intersection_start: int = 300 # Y start of intersection zone
+    intersection_end: int = 500   # Y end of intersection zone
 
     @property
     def stop_line_y(self) -> int:
-        """Vị trí vạch dừng (trung tâm của stop zone)."""
+        """Stop line position (center of stop zone)."""
         return (self.stop_start + self.stop_end) // 2
 
     def get_zone_name(self, y_bottom: int, y_top: int = None) -> str:
         """
-        Xác định tên vùng dựa trên tọa độ Y và hướng camera.
+        Determine zone name based on Y coordinates and camera direction.
         
-        Với direction="down" (top-down): xe đi từ trên xuống
+        With direction="down" (top-down): vehicle moves from top to bottom
           - waiting: y_bottom <= waiting_end
           - stop: waiting_end < y_bottom <= stop_end
           - intersection: y_bottom > intersection_start
           
-        Với direction="up" (rear-view): xe đi từ dưới lên
-          - waiting: y_bottom >= waiting_end (gần camera)
+        With direction="up" (rear-view): vehicle moves from bottom to top
+          - waiting: y_bottom >= waiting_end (near camera)
           - stop: waiting_end > y_bottom >= stop_start
-          - intersection: y_bottom < intersection_start (xa camera)
+          - intersection: y_bottom < intersection_start (far from camera)
         """
         if self.direction == "up":
-            # Đảo ngược: camera nhìn từ đằng sau
+            # Reverse: camera looks from behind
             if y_bottom >= self.waiting_end:
                 return "waiting"
             elif y_bottom >= self.stop_start:
@@ -70,7 +70,7 @@ class ZoneConfig:
             elif y_bottom <= self.intersection_start:
                 return "intersection"
         else:
-            # Mặc định: camera nhìn từ trên xuống
+            # Default: camera looks from top-down
             if y_bottom <= self.waiting_end:
                 return "waiting"
             elif y_bottom <= self.stop_end:
@@ -91,11 +91,11 @@ class ZoneConfig:
 
 class VehicleZoneState:
     """
-    Theo dõi trạng thái vùng của một xe qua các frame.
+    Tracks zone state of a vehicle across frames.
     """
     def __init__(self, track_id: int, initial_zone: str):
         self.track_id = track_id
-        self.zones_visited = [initial_zone]  # Lịch sử các vùng đã đi qua
+        self.zones_visited = [initial_zone]  # History of zones visited
         self.current_zone = initial_zone
         self.first_seen_time = cv2.getTickCount()
         self.last_seen_time = self.first_seen_time
@@ -104,7 +104,7 @@ class VehicleZoneState:
         self.positions_history: List[Tuple[int, int]] = []  # (y_bottom, frame_count)
 
     def update(self, zone: str, y_bottom: int, frame_count: int = 0):
-        """Cập nhật vị trí mới của xe."""
+        """Update vehicle's new position."""
         self.last_seen_time = cv2.getTickCount()
         self.positions_history.append((y_bottom, frame_count))
 
@@ -115,35 +115,35 @@ class VehicleZoneState:
 
     def has_violated_red_light(self) -> bool:
         """
-        Kiểm tra vi phạm dựa trên lịch sử vùng.
-        Vi phạm khi: waiting → stop → intersection (đi qua cả 3 vùng).
+        Check violation based on zone history.
+        Violation when: waiting → stop → intersection (passes through all 3 zones).
         """
         if self.violation_detected:
             return True
 
-        # Kiểm tra thứ tự: phải có waiting, stop, intersection
+        # Check order: must have waiting, stop, intersection
         has_waiting = "waiting" in self.zones_visited
         has_stop = "stop" in self.zones_visited
         has_intersection = "intersection" in self.zones_visited
 
         if has_waiting and has_stop and has_intersection:
-            # Kiểm tra thứ tự xuất hiện (không tính "unknown")
+            # Check order of appearance (excluding "unknown")
             ordered_zones = [z for z in self.zones_visited if z != "unknown"]
             if len(ordered_zones) >= 3:
-                # Tìm index của từng vùng
+                # Find index of each zone
                 try:
                     idx_waiting = ordered_zones.index("waiting")
                     idx_stop = ordered_zones.index("stop")
                     idx_intersection = ordered_zones.index("intersection")
-                    # Phải theo thứ tự: waiting -> stop -> intersection
+                    # Must follow order: waiting -> stop -> intersection
                     if idx_waiting < idx_stop < idx_intersection:
                         self.violation_detected = True
                         return True
                 except ValueError:
                     pass
 
-        # Trường hợp: xe xuất hiện ở waiting rồi vào thẳng intersection
-        # (vượt đèn đỏ với tốc độ cao)
+        # Case: vehicle appears in waiting then goes straight to intersection
+        # (speeding through red light)
         if has_waiting and has_intersection and not has_stop:
             # Check if it went from waiting directly to intersection (speeding through)
             ordered_zones = [z for z in self.zones_visited if z != "unknown"]
@@ -152,7 +152,7 @@ class VehicleZoneState:
                     idx_waiting = ordered_zones.index("waiting")
                     idx_intersection = ordered_zones.index("intersection")
                     if idx_waiting < idx_intersection:
-                        # Kiểm tra nếu xe đi rất nhanh qua khu vực stop
+                        # Check if vehicle passed through stop zone very quickly
                         self.violation_detected = True
                         return True
                 except ValueError:
@@ -162,23 +162,23 @@ class VehicleZoneState:
 
     def is_clearing_intersection(self) -> bool:
         """
-        Xe đang thoát giao lộ (đã ở intersection từ đầu).
-        Không tính là vi phạm.
+        Vehicle is exiting intersection (was in intersection from the start).
+        Not counted as violation.
         """
         if len(self.zones_visited) == 1 and self.zones_visited[0] == "intersection":
             return True
         return False
 
     def should_be_tracked(self, max_inactive_ticks: int = 5000000) -> bool:
-        """Kiểm tra xe còn đang được theo dõi hay không."""
+        """Check if vehicle is still being tracked."""
         elapsed = cv2.getTickCount() - self.last_seen_time
         return elapsed < max_inactive_ticks
 
 
 class RedLightZoneDetector:
     """
-    Phát hiện vượt đèn đỏ dựa trên vùng (zone-based).
-    Sử dụng ZoneConfig và VehicleZoneState để theo dõi và phát hiện vi phạm.
+    Detects red light violations based on zones (zone-based).
+    Uses ZoneConfig and VehicleZoneState to track and detect violations.
     """
 
     def __init__(self, zone_config: Optional[ZoneConfig] = None):
@@ -192,7 +192,7 @@ class RedLightZoneDetector:
     def update_config(self, waiting_end: int = None, stop_start: int = None,
                       stop_end: int = None, intersection_start: int = None,
                       intersection_end: int = None):
-        """Cập nhật cấu hình vùng."""
+        """Update zone configuration."""
         if waiting_end is not None:
             self.config.waiting_end = waiting_end
             self.config.stop_start = waiting_end
@@ -207,27 +207,27 @@ class RedLightZoneDetector:
             self.config.intersection_start = intersection_start
 
     def set_red_light(self, is_red: bool):
-        """Cập nhật trạng thái đèn đỏ."""
+        """Update red light status."""
         if is_red and not self.red_light_active:
             self.red_light_start_frame = self.frame_count
         self.red_light_active = is_red
 
     def update_from_traffic_lights(self, lights: List[Dict]):
-        """Cập nhật trạng thái đèn từ danh sách đèn giao thông."""
+        """Update red light status from traffic light list."""
         is_red = any(light.get("state") == "red" for light in lights)
         self.set_red_light(is_red)
 
     def process_vehicles(self, road_users_or_tracked: List[Any]) -> List[Dict]:
         """
-        Xử lý danh sách xe từ traffic light detection hoặc tracker.
-        Trả về danh sách vi phạm phát hiện được.
+        Process vehicle list from traffic light detection or tracker.
+        Returns list of detected violations.
 
         Args:
-            road_users_or_tracked: list các dict với keys: bbox, class_name, conf
-                                   hoặc list các track có bbox
+            road_users_or_tracked: list of dicts with keys: bbox, class_name, conf
+                                   or list of tracks with bbox
 
         Returns:
-            list các dict: {bbox, class_name, conf, details, zone_history}
+            list of dicts: {bbox, class_name, conf, details, zone_history}
         """
         self.frame_count += 1
         violations = []
@@ -254,7 +254,7 @@ class RedLightZoneDetector:
 
             current_track_ids.add(track_id)
 
-            # Tạo mới hoặc cập nhật state
+            # Create new or update state
             if track_id not in self.tracked_vehicles:
                 self.tracked_vehicles[track_id] = VehicleZoneState(track_id, zone)
 
@@ -263,7 +263,7 @@ class RedLightZoneDetector:
             if self.debug:
                 print(f"  Track {track_id}: zone={zone}, y_bottom={y_bottom}")
 
-        # Dọn dẹp các track không còn hoạt động
+        # Clean up inactive tracks
         inactive_ids = [
             tid for tid, state in self.tracked_vehicles.items()
             if not state.should_be_tracked()
@@ -271,18 +271,18 @@ class RedLightZoneDetector:
         for tid in inactive_ids:
             del self.tracked_vehicles[tid]
 
-        # Kiểm tra vi phạm khi đèn đỏ
+        # Check violations when red light
         if self.red_light_active:
             for tid, state in self.tracked_vehicles.items():
                 if state.violation_detected:
                     continue
 
-                # Bỏ qua xe đang thoát giao lộ
+                # Skip vehicles exiting intersection
                 if state.is_clearing_intersection():
                     continue
 
                 if state.has_violated_red_light():
-                    # Tìm thông tin xe
+                    # Find vehicle information
                     obj_info = None
                     for obj in road_users_or_tracked:
                         if isinstance(obj, dict):
@@ -294,13 +294,13 @@ class RedLightZoneDetector:
                         "bbox": obj_info.get("bbox") if obj_info else None,
                         "class_name": obj_info.get("class_name", "vehicle") if obj_info else "vehicle",
                         "conf": obj_info.get("conf", 0.0) if obj_info else 0.0,
-                        "details": "Vượt đèn đỏ (zone-based)",
+                        "details": "Red light running (zone-based)",
                         "track_id": tid,
                         "zone_history": state.zones_visited.copy(),
                         "violation_type": "RED_LIGHT_VIOLATION",
                     }
 
-                    # Fallback: tìm bbox từ lịch sử
+                    # Fallback: find bbox from history
                     if violation["bbox"] is None and state.positions_history:
                         violation["bbox"] = (0, 0, 0, 0)
 
@@ -311,37 +311,37 @@ class RedLightZoneDetector:
 
     def process_detected_objects(self, lights: List[Dict], road_users: List[Dict]) -> List[Dict]:
         """
-        Phương thức tích hợp: nhận đầu ra từ detect_traffic_scene(),
-        tự động cập nhật trạng thái đèn và phát hiện vi phạm.
+        Integration method: receives output from detect_traffic_scene(),
+        automatically updates light status and detects violations.
 
         Args:
-            lights: list đèn từ detect_traffic_scene()
-            road_users: list người/phương tiện từ detect_traffic_scene()
+            lights: list of lights from detect_traffic_scene()
+            road_users: list of people/vehicles from detect_traffic_scene()
 
         Returns:
-            list vi phạm
+            list of violations
         """
         self.update_from_traffic_lights(lights)
         return self.process_vehicles(road_users)
 
     def draw_zones(self, frame: np.ndarray) -> np.ndarray:
-        """Vẽ các vùng lên frame để debug/visualization."""
+        """Draw zones on frame for debug/visualization."""
         h, w = frame.shape[:2]
 
-        # Màu sắc các vùng (BGR với alpha)
+        # Zone colors (BGR with alpha)
         colors = {
-            "waiting": (200, 200, 100),      # Vàng nhạt
-            "stop": (100, 100, 200),         # Đỏ nhạt
-            "intersection": (100, 200, 100), # Xanh lá nhạt
+            "waiting": (200, 200, 100),      # Light yellow
+            "stop": (100, 100, 200),         # Light red
+            "intersection": (100, 200, 100), # Light green
         }
 
-        # Vẽ từng vùng
+        # Draw each zone
         overlay = frame.copy()
 
         if self.config.direction == "up":
-            # Rear-view: xe đi từ dưới lên (Y lớn -> Y nhỏ)
-            # Waiting zone: gần camera (Y lớn)
-            # Intersection: xa camera (Y nhỏ)
+            # Rear-view: vehicle moves from bottom to top (large Y -> small Y)
+            # Waiting zone: near camera (large Y)
+            # Intersection: far from camera (small Y)
             cv2.rectangle(overlay,
                           (0, self.config.waiting_end),
                           (w, self.config.waiting_start),
@@ -357,7 +357,7 @@ class RedLightZoneDetector:
                           (w, self.config.intersection_start),
                           colors["intersection"], -1)
         else:
-            # Top-down: xe đi từ trên xuống (Y nhỏ -> Y lớn)
+            # Top-down: vehicle moves from top to bottom (small Y -> large Y)
             cv2.rectangle(overlay,
                           (0, self.config.waiting_start),
                           (w, self.config.waiting_end),
@@ -377,7 +377,7 @@ class RedLightZoneDetector:
         alpha = 0.15
         frame = cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0)
 
-        # Vẽ đường viền và nhãn
+        # Draw borders and labels
         if self.config.direction == "up":
             y_centers = {
                 "WAITING ZONE": (self.config.waiting_start + self.config.waiting_end) // 2,
@@ -400,7 +400,7 @@ class RedLightZoneDetector:
             cv2.putText(frame, label, (x_center, y_center),
                         font, font_scale, (255, 255, 255), thickness)
 
-        # Vẽ vạch dừng (stop line)
+        # Draw stop line
         stop_line_y = self.config.stop_line_y
         cv2.line(frame, (0, stop_line_y), (w, stop_line_y), (0, 0, 255), 3)
         cv2.putText(frame, "STOP LINE", (10, stop_line_y - 8),
@@ -409,14 +409,14 @@ class RedLightZoneDetector:
         return frame
 
     def reset(self):
-        """Reset toàn bộ trạng thái."""
+        """Reset all state."""
         self.tracked_vehicles.clear()
         self.frame_count = 0
         self.red_light_active = False
         self.red_light_start_frame = -1
 
     def get_stats(self) -> Dict:
-        """Lấy thống kê hiện tại."""
+        """Get current statistics."""
         return {
             "frame_count": self.frame_count,
             "red_light_active": self.red_light_active,

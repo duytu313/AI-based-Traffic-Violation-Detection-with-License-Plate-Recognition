@@ -17,14 +17,14 @@ export default function Settings() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           chat_id: chatId,
-          text: "✅ Kết nối thành công! Bot sẽ gửi ảnh khi phát hiện xe mới.",
+          text: "✅ Connection successful! Bot will send images when new vehicles are detected.",
         }),
       });
       const data = await res.json();
       if (data.ok) {
-        setTestResult({ success: true, msg: "Gửi tin nhắn test thành công!" });
+        setTestResult({ success: true, msg: "Test message sent successfully!" });
       } else {
-        setTestResult({ success: false, msg: data.description || "Lỗi không xác định" });
+        setTestResult({ success: false, msg: data.description || "Unknown error" });
       }
     } catch (err: any) {
       setTestResult({ success: false, msg: err.message });
@@ -40,9 +40,9 @@ export default function Settings() {
             <Settings2 className="w-5 h-5 text-slate-400" />
           </div>
           <div>
-            <h2 className="font-bold text-white">Cấu hình hệ thống</h2>
+            <h2 className="font-bold text-white">System Configuration</h2>
             <p className="text-sm text-slate-400">
-              Cài đặt thông báo và cấu hình chung
+              Notification settings and general configuration
             </p>
           </div>
         </div>
@@ -55,9 +55,9 @@ export default function Settings() {
             <Bell className="w-5 h-5 text-blue-400" />
           </div>
           <div>
-            <h3 className="font-semibold text-white">🤖 Thông báo Telegram</h3>
+            <h3 className="font-semibold text-white">🤖 Telegram Notifications</h3>
             <p className="text-sm text-slate-400">
-              Cấu hình bot Telegram để nhận thông báo khi phát hiện phương tiện và vi phạm
+              Configure Telegram bot to receive notifications when vehicles and violations are detected
             </p>
           </div>
         </div>
@@ -71,11 +71,11 @@ export default function Settings() {
               type="password"
               value={botToken}
               onChange={(e) => setBotToken(e.target.value)}
-              placeholder="Nhập Telegram Bot Token..."
+              placeholder="Enter Telegram Bot Token..."
               className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             <p className="text-xs text-slate-500 mt-1">
-              Lấy từ @BotFather trên Telegram
+              Get from @BotFather on Telegram
             </p>
           </div>
 
@@ -87,11 +87,11 @@ export default function Settings() {
               type="text"
               value={chatId}
               onChange={(e) => setChatId(e.target.value)}
-              placeholder="Nhập Chat ID..."
+              placeholder="Enter Chat ID..."
               className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             <p className="text-xs text-slate-500 mt-1">
-              Lấy từ @userinfobot hoặc @getidsbot
+              Get from @userinfobot or @getidsbot
             </p>
           </div>
 
@@ -101,7 +101,7 @@ export default function Settings() {
             className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-700 disabled:text-slate-400 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
           >
             <Send className="w-4 h-4" />
-            Gửi tin nhắn test
+            Send Test Message
           </button>
 
           {testResult && (
@@ -131,20 +131,20 @@ export default function Settings() {
 
       {/* Info */}
       <div className="card">
-        <h3 className="font-semibold text-white mb-3">📝 Ghi chú</h3>
+        <h3 className="font-semibold text-white mb-3">📝 Notes</h3>
         <ul className="space-y-2 text-sm text-slate-300">
           <li>
-            • Cấu hình Telegram được lưu trong biến môi trường{" "}
+            • Telegram configuration is stored in environment variables{" "}
             <code className="px-1.5 py-0.5 bg-slate-700 rounded text-xs">
               TELEGRAM_BOT_TOKEN
             </code>{" "}
-            và{" "}
+            and{" "}
             <code className="px-1.5 py-0.5 bg-slate-700 rounded text-xs">
               TELEGRAM_CHAT_ID
             </code>
           </li>
-          <li>• Bạn có thể cập nhật token tại file backend/src/utils/notifications.py</li>
-          <li>• Các ngưỡng phát hiện vi phạm được cấu hình trong tab Xử lý ảnh</li>
+          <li>• You can update the token in file backend/src/utils/notifications.py</li>
+          <li>• Violation detection thresholds are configured in the Image Processing tab</li>
         </ul>
       </div>
     </div>

@@ -12,6 +12,8 @@ export default function ConfigPanel({ config, onChange }: ConfigPanelProps) {
     const next = { ...config, ...partial };
     // Ensure all required fields are present with defaults
     if (next.show_zones === undefined) next.show_zones = false;
+    if (next.show_bev === undefined) next.show_bev = true;
+    if (next.enable_bev_detection === undefined) next.enable_bev_detection = true;
     if (next.camera_direction === undefined) next.camera_direction = "down";
     onChange(next as Config);
   };
@@ -20,12 +22,14 @@ export default function ConfigPanel({ config, onChange }: ConfigPanelProps) {
   const c = {
     ...config,
     show_zones: config.show_zones ?? false,
+    show_bev: config.show_bev ?? true,
+    enable_bev_detection: config.enable_bev_detection ?? true,
     camera_direction: (config.camera_direction ?? "down") as "down" | "up",
   };
   return (
     <div className="card space-y-4">
       <h3 className="font-semibold text-white flex items-center gap-2">
-        <span>⚙️ Cấu hình xử lý</span>
+        <span>⚙️ Processing Configuration</span>
       </h3>
 
       {/* Violation Detection */}
@@ -37,14 +41,14 @@ export default function ConfigPanel({ config, onChange }: ConfigPanelProps) {
             onChange={(e) => update({ enable_violation_detection: e.target.checked })}
             className="w-4 h-4 rounded border-slate-600 bg-slate-700 text-blue-500 focus:ring-blue-500"
           />
-          <span>Bật phát hiện vi phạm</span>
+          <span>Enable violation detection</span>
         </label>
 
         {c.enable_violation_detection && (
           <div className="space-y-2 pl-6">
             <div>
               <label className="text-xs text-slate-400">
-                Ngưỡng vi phạm chung: {(c.violation_conf_limit * 100).toFixed(0)}%
+                General violation threshold: {(c.violation_conf_limit * 100).toFixed(0)}%
               </label>
               <input
                 type="range"
@@ -58,7 +62,7 @@ export default function ConfigPanel({ config, onChange }: ConfigPanelProps) {
             </div>
             <div>
               <label className="text-xs text-slate-400">
-                Chở quá 2 người: {(c.conf_more_than_two * 100).toFixed(0)}%
+                Carrying more than 2 people: {(c.conf_more_than_two * 100).toFixed(0)}%
               </label>
               <input
                 type="range"
@@ -72,7 +76,7 @@ export default function ConfigPanel({ config, onChange }: ConfigPanelProps) {
             </div>
             <div>
               <label className="text-xs text-slate-400">
-                Không mũ bảo hiểm: {(c.conf_no_helmet * 100).toFixed(0)}%
+                No helmet: {(c.conf_no_helmet * 100).toFixed(0)}%
               </label>
               <input
                 type="range"
@@ -86,7 +90,7 @@ export default function ConfigPanel({ config, onChange }: ConfigPanelProps) {
             </div>
             <div>
               <label className="text-xs text-slate-400">
-                Dùng điện thoại: {(c.conf_using_mobile * 100).toFixed(0)}%
+                Using phone: {(c.conf_using_mobile * 100).toFixed(0)}%
               </label>
               <input
                 type="range"
@@ -111,14 +115,14 @@ export default function ConfigPanel({ config, onChange }: ConfigPanelProps) {
             onChange={(e) => update({ enable_red_light_detection: e.target.checked })}
             className="w-4 h-4 rounded border-slate-600 bg-slate-700 text-blue-500 focus:ring-blue-500"
           />
-          <span>🚦 Bật phát hiện vượt đèn đỏ</span>
+          <span>🚦 Enable red light violation detection</span>
         </label>
 
         {c.enable_red_light_detection && (
           <div className="space-y-2 pl-6">
             <div>
               <label className="text-xs text-slate-400">
-                Ngưỡng đèn: {(c.traffic_light_conf * 100).toFixed(0)}%
+                Light threshold: {(c.traffic_light_conf * 100).toFixed(0)}%
               </label>
               <input
                 type="range"
@@ -131,7 +135,7 @@ export default function ConfigPanel({ config, onChange }: ConfigPanelProps) {
               />
             </div>
             <p className="text-xs text-slate-500">
-              Vượt đèn đỏ được phát hiện khi xe nằm trong vùng ROI được vẽ thủ công.
+              Red light violations are detected when vehicles are inside the manually drawn ROI zone.
             </p>
           </div>
         )}
@@ -140,14 +144,14 @@ export default function ConfigPanel({ config, onChange }: ConfigPanelProps) {
       {/* Zone Visualization */}
       <div className="space-y-3 pt-2 border-t border-slate-700">
         <div>
-          <label className="text-xs text-slate-400">Hướng camera</label>
+          <label className="text-xs text-slate-400">Camera direction</label>
           <select
             value={c.camera_direction}
             onChange={(e) => update({ camera_direction: e.target.value as "down" | "up" })}
             className="w-full mt-1 px-3 py-1.5 text-sm bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
-            <option value="down">Camera trên cao (top-down)</option>
-            <option value="up">Camera đằng sau (rear-view)</option>
+            <option value="down">Overhead camera (top-down)</option>
+            <option value="up">Rear camera (rear-view)</option>
           </select>
         </div>
         <label className="flex items-center gap-2 text-sm">
@@ -157,25 +161,25 @@ export default function ConfigPanel({ config, onChange }: ConfigPanelProps) {
             onChange={(e) => update({ show_zones: e.target.checked })}
             className="w-4 h-4 rounded border-slate-600 bg-slate-700 text-blue-500 focus:ring-blue-500"
           />
-          <span>🗺️ Hiển thị vùng (Waiting/Stop/Intersection)</span>
+          <span>🗺️ Show zones (Waiting/Stop/Intersection)</span>
         </label>
         {config.show_zones && (
           <div className="pl-6 space-y-1">
             <div className="flex items-center gap-2 text-xs">
               <span className="inline-block w-3 h-3 bg-yellow-500/30 border border-yellow-500 rounded"></span>
-              <span className="text-slate-400">Waiting Zone - Vùng chờ đèn</span>
+               <span className="text-slate-400">Waiting Zone - Red light waiting area</span>
             </div>
             <div className="flex items-center gap-2 text-xs">
               <span className="inline-block w-3 h-3 bg-red-500/30 border border-red-500 rounded"></span>
-              <span className="text-slate-400">Stop Zone - Vùng vạch dừng</span>
+               <span className="text-slate-400">Stop Zone - Stop line area</span>
             </div>
             <div className="flex items-center gap-2 text-xs">
               <span className="inline-block w-3 h-3 bg-green-500/30 border border-green-500 rounded"></span>
-              <span className="text-slate-400">Intersection - Giao lộ</span>
+               <span className="text-slate-400">Intersection - Intersection area</span>
             </div>
             <div className="flex items-center gap-2 text-xs mt-1">
               <span className="inline-block w-6 h-0.5 bg-red-500"></span>
-              <span className="text-slate-400">Stop Line - Vạch dừng</span>
+               <span className="text-slate-400">Stop Line - Stop line</span>
             </div>
           </div>
         )}

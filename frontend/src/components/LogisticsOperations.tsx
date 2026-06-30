@@ -72,8 +72,8 @@ function isUnknownPlate(plate?: string | null) {
 }
 
 const cameraLabels: Record<LogisticsCamera, { label: string; icon: React.ElementType; color: string }> = {
-  gate: { label: "Cổng ra vào", icon: LogIn, color: "text-emerald-400" },
-  construction_site: { label: "Công trường", icon: Construction, color: "text-yellow-400" },
+  gate: { label: "Entry/Exit Gate", icon: LogIn, color: "text-emerald-400" },
+  construction_site: { label: "Construction Site", icon: Construction, color: "text-yellow-400" },
 };
 
 function CameraMonitor({
@@ -101,12 +101,12 @@ function CameraMonitor({
           </div>
           <div>
             <h3 className="font-semibold text-white">{meta.label}</h3>
-            <p className="text-sm text-slate-400">Phát hiện xe lạ realtime</p>
+            <p className="text-sm text-slate-400">Realtime unknown vehicle detection</p>
           </div>
         </div>
         <span className={`badge ${state.running ? "bg-emerald-500/10 text-emerald-400" : "bg-slate-700 text-slate-400"}`}>
           <span className={`h-1.5 w-1.5 rounded-full ${state.running ? "bg-emerald-400" : "bg-slate-500"}`} />
-          {state.running ? `Live ${state.fps.toFixed(1)} FPS` : "Tạm dừng"}
+          {state.running ? `Live ${state.fps.toFixed(1)} FPS` : "Paused"}
         </span>
       </div>
 
@@ -124,11 +124,11 @@ function CameraMonitor({
         <div className="absolute bottom-5 left-5 right-5 rounded-lg border border-slate-600/80 bg-slate-950/80 p-3 backdrop-blur">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="text-xs text-slate-400">Biển số nhận diện</p>
-              <p className="mt-1 text-2xl font-bold tracking-wide text-white">{state.plate || "Đang chờ..."}</p>
+               <p className="text-xs text-slate-400">Recognized license plate</p>
+               <p className="mt-1 text-2xl font-bold tracking-wide text-white">{state.plate || "Waiting..."}</p>
             </div>
             <div className="text-right">
-              <p className="text-xs text-slate-400">Xe lạ</p>
+               <p className="text-xs text-slate-400">Unknown vehicles</p>
               <p className="mt-1 text-lg font-semibold text-yellow-300">{state.unknownAlerts.length}</p>
             </div>
           </div>
@@ -136,11 +136,11 @@ function CameraMonitor({
       </div>
 
       <label className="space-y-1.5">
-        <span className="text-xs font-medium text-slate-400">Nguồn camera (RTSP/webcam)</span>
+        <span className="text-xs font-medium text-slate-400">Camera source (RTSP/webcam)</span>
         <input
           value={state.source}
           onChange={() => {}}
-          placeholder="0 (webcam) hoặc rtsp://..."
+          placeholder="0 (webcam) or rtsp://..."
           className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
       </label>
@@ -148,7 +148,7 @@ function CameraMonitor({
       {/* Unknown vehicle alerts */}
       {state.unknownAlerts.length > 0 && (
         <div className="space-y-2">
-          <p className="text-xs font-medium text-yellow-400">Cảnh báo xe lạ gần đây:</p>
+          <p className="text-xs font-medium text-yellow-400">Recent unknown vehicle alerts:</p>
           <div className="max-h-32 space-y-1.5 overflow-y-auto">
             {state.unknownAlerts.slice(-5).reverse().map((alert, idx) => (
               <div key={idx} className="flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/5 p-2">
@@ -169,21 +169,21 @@ function CameraMonitor({
           className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-500"
         >
           <Camera className="h-4 w-4" />
-          {state.running ? "Đang chạy" : "Bắt đầu"}
+          {state.running ? "Running" : "Start"}
         </button>
         <button
           onClick={onRefresh}
           className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm font-medium text-slate-300 transition-colors hover:bg-slate-800"
         >
           <RefreshCw className="h-4 w-4" />
-          Làm mới
+          Refresh
         </button>
         <button
           onClick={onStop}
           className="inline-flex items-center justify-center gap-2 rounded-lg border border-red-700 px-3 py-2 text-sm font-medium text-red-300 transition-colors hover:bg-red-800"
         >
           <XCircle className="h-4 w-4" />
-          Dừng
+          Stop
         </button>
       </div>
     </section>
@@ -323,39 +323,39 @@ export default function LogisticsOperations() {
   const riskRows = useMemo(() => {
     const rows = [...fraudAlerts.map((item) => ({
       id: `fraud-${item.id}`,
-      plate: item.license_plate || "Không rõ",
+      plate: item.license_plate || "Unknown",
       type: item.vehicle_type || "-",
-      reason: item.fraud_reason || "Nghi vấn gian lận dữ liệu xe ra vào",
+      reason: item.fraud_reason || "Suspected vehicle entry/exit data fraud",
       time: item.entry_time,
-      level: "Cao",
+      level: "High",
     }))];
 
     unknownPlateRows.slice(0, 8).forEach((item) => rows.push({
       id: `unknown-${item.id}`,
-      plate: item.license_plate || "Không đọc được",
+      plate: item.license_plate || "Unreadable",
       type: item.vehicle_type || "-",
-      reason: "OCR không đọc được biển số, cần bảo vệ xác minh trước khi cho xe qua cổng",
+      reason: "OCR cannot read license plate, security verification required before allowing vehicle through gate",
       time: item.entry_time,
-      level: "Trung bình",
+      level: "Medium",
     }));
 
     longStayRows.slice(0, 8).forEach((item) => rows.push({
       id: `long-${item.id}`,
-      plate: item.license_plate || "Không rõ",
+      plate: item.license_plate || "Unknown",
       type: item.vehicle_type || "-",
-      reason: `Xe còn trong khu ${diffHours(item.entry_time)} giờ, cần đối chiếu lệnh xuất/nhập hàng`,
+      reason: `Vehicle still in area for ${diffHours(item.entry_time)} hours, need to verify shipping orders`,
       time: item.entry_time,
-      level: "Theo dõi",
+      level: "Monitor",
     }));
 
     return rows;
   }, [fraudAlerts, longStayRows, unknownPlateRows]);
 
   const cards = [
-    { label: "Xe đang trong khu", value: activeInside.length, icon: Truck, color: "text-blue-400", bg: "bg-blue-500/10" },
-    { label: "Lượt xe tải ghi nhận", value: truckVisits.length, icon: Factory, color: "text-cyan-400", bg: "bg-cyan-500/10" },
-    { label: "Biển số cần xác minh", value: unknownPlateRows.length, icon: UserCheck, color: "text-yellow-400", bg: "bg-yellow-500/10" },
-    { label: "Cảnh báo xe lạ (realtime)", value: totalUnknownAlerts, icon: AlertTriangle, color: "text-red-400", bg: "bg-red-500/10" },
+    { label: "Vehicles in Area", value: activeInside.length, icon: Truck, color: "text-blue-400", bg: "bg-blue-500/10" },
+    { label: "Truck Visits", value: truckVisits.length, icon: Factory, color: "text-cyan-400", bg: "bg-cyan-500/10" },
+    { label: "Plates to Verify", value: unknownPlateRows.length, icon: UserCheck, color: "text-yellow-400", bg: "bg-yellow-500/10" },
+    { label: "Unknown Vehicle Alerts (realtime)", value: totalUnknownAlerts, icon: AlertTriangle, color: "text-red-400", bg: "bg-red-500/10" },
   ];
 
   return (
@@ -367,13 +367,13 @@ export default function LogisticsOperations() {
               <Factory className="h-5 w-5 text-cyan-400" />
             </div>
             <div>
-              <h2 className="font-bold text-white">Khu công nghiệp & Kho vận</h2>
-              <p className="text-sm text-slate-400">2 luồng camera realtime: cổng ra vào + công trường - phát hiện xe lạ, kiểm soát xe tải</p>
+              <h2 className="font-bold text-white">Industrial Park & Logistics</h2>
+              <p className="text-sm text-slate-400">2 realtime camera streams: entry/exit gate + construction site - detect unknown vehicles, control trucks</p>
             </div>
           </div>
           <button onClick={() => void fetchData()} className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm font-medium text-slate-300 hover:bg-slate-800">
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-            Làm mới dữ liệu thật
+            Refresh real data
           </button>
         </div>
       </div>
@@ -411,15 +411,15 @@ export default function LogisticsOperations() {
         <section className="card overflow-hidden p-0">
           <div className="flex flex-col gap-3 border-b border-slate-700/50 p-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <h3 className="font-semibold text-white">Xe đang ở trong khu</h3>
-              <p className="text-sm text-slate-400">Dữ liệu lấy từ bảng vehicles: xe chưa có thời gian ra</p>
+              <h3 className="font-semibold text-white">Vehicles Currently in Area</h3>
+              <p className="text-sm text-slate-400">Data from vehicles table: vehicles without exit time</p>
             </div>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
               <input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Tìm biển số, loại xe..."
+                  placeholder="Search license plate, vehicle type..."
                 className="w-full rounded-lg border border-slate-700 bg-slate-900 py-2 pl-9 pr-3 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 lg:w-64"
               />
             </div>
@@ -428,26 +428,26 @@ export default function LogisticsOperations() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-700/50">
-                  <th className="p-3 text-left font-medium text-slate-400">Biển số</th>
-                  <th className="p-3 text-left font-medium text-slate-400">Loại xe</th>
-                  <th className="p-3 text-left font-medium text-slate-400">Màu</th>
-                  <th className="p-3 text-left font-medium text-slate-400">Giờ vào</th>
-                  <th className="p-3 text-left font-medium text-slate-400">Thời gian lưu</th>
-                  <th className="p-3 text-left font-medium text-slate-400">Trạng thái</th>
+                <th className="p-3 text-left font-medium text-slate-400">License Plate</th>
+                <th className="p-3 text-left font-medium text-slate-400">Vehicle Type</th>
+                <th className="p-3 text-left font-medium text-slate-400">Color</th>
+                <th className="p-3 text-left font-medium text-slate-400">Entry Time</th>
+                <th className="p-3 text-left font-medium text-slate-400">Duration</th>
+                <th className="p-3 text-left font-medium text-slate-400">Status</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredActive.length === 0 ? (
-                  <tr><td colSpan={6} className="p-8 text-center text-slate-500">Chưa có xe đang trong khu</td></tr>
+                  <tr><td colSpan={6} className="p-8 text-center text-slate-500">No vehicles currently in area</td></tr>
                 ) : filteredActive.map((v) => (
                   <tr key={v.id} className="border-b border-slate-800/50 hover:bg-slate-800/30">
-                    <td className="p-3"><span className="badge bg-blue-500/10 text-blue-400">{v.license_plate || "Không đọc được"}</span></td>
+                    <td className="p-3"><span className="badge bg-blue-500/10 text-blue-400">{v.license_plate || "Unreadable"}</span></td>
                     <td className="p-3 text-slate-300">{v.vehicle_type || "-"}</td>
                     <td className="p-3 text-slate-300">{v.color || "-"}</td>
                     <td className="p-3 text-slate-300">{formatTime(v.entry_time)}</td>
-                    <td className="p-3 text-slate-300">{diffHours(v.entry_time)} giờ</td>
+                    <td className="p-3 text-slate-300">{diffHours(v.entry_time)} hours</td>
                     <td className="p-3">
-                      {isUnknownPlate(v.license_plate) ? <span className="badge bg-yellow-500/10 text-yellow-400">Cần xác minh</span> : <span className="badge bg-emerald-500/10 text-emerald-400">Hợp lệ</span>}
+                      {isUnknownPlate(v.license_plate) ? <span className="badge bg-yellow-500/10 text-yellow-400">Needs verification</span> : <span className="badge bg-emerald-500/10 text-emerald-400">Valid</span>}
                     </td>
                   </tr>
                 ))}
@@ -459,14 +459,14 @@ export default function LogisticsOperations() {
         <section className="card space-y-4">
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="font-semibold text-white">Hàng đợi rủi ro</h3>
-              <p className="text-sm text-slate-400">Gian lận, xe lạ, lưu khu bất thường</p>
+              <h3 className="font-semibold text-white">Risk Queue</h3>
+              <p className="text-sm text-slate-400">Fraud, unknown vehicles, unusual stays</p>
             </div>
             <ShieldCheck className="h-5 w-5 text-cyan-400" />
           </div>
           <div className="space-y-3">
             {riskRows.length === 0 ? (
-              <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-200">Không có cảnh báo rủi ro từ dữ liệu hiện tại</div>
+               <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-200">No risk alerts from current data</div>
             ) : riskRows.slice(0, 10).map((item) => (
               <div key={item.id} className="rounded-lg border border-slate-700 bg-slate-900 p-3">
                 <div className="flex items-start justify-between gap-3">

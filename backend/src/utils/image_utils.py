@@ -1,5 +1,5 @@
 """
-Image Utilities - Các hàm bổ trợ xử lý ảnh, bounding box, crop
+Image Utilities - Helper functions for image processing, bounding box, crop
 """
 import cv2
 import numpy as np
@@ -7,7 +7,7 @@ from typing import Tuple, List, Dict, Optional
 
 
 def bbox_iou(a: Tuple[int, int, int, int], b: Tuple[int, int, int, int]) -> float:
-    """Tính Intersection over Union giữa 2 bounding boxes."""
+    """Calculate Intersection over Union between 2 bounding boxes."""
     ax1, ay1, ax2, ay2 = a
     bx1, by1, bx2, by2 = b
     ix1, iy1 = max(ax1, bx1), max(ay1, by1)
@@ -21,8 +21,8 @@ def bbox_iou(a: Tuple[int, int, int, int], b: Tuple[int, int, int, int]) -> floa
 
 def crop_vehicle_context(image: np.ndarray, bbox: Tuple[int, int, int, int], vehicle_type: str):
     """
-    Crop có ngữ cảnh. Với xe máy, bbox COCO thường chỉ ôm phần xe,
-    nên cần mở rộng lên trên và hai bên để chứa người ngồi, mũ và tay.
+    Context-aware crop. For motorcycles, COCO bbox usually only covers the vehicle,
+    so we need to expand upward and to the sides to include the rider, helmet, and hands.
     """
     x1, y1, x2, y2 = bbox
     h_img, w_img = image.shape[:2]
@@ -46,7 +46,7 @@ def crop_vehicle_context(image: np.ndarray, bbox: Tuple[int, int, int, int], veh
 
 
 def normalize_vehicle_tuple(vehicle: tuple):
-    """Chuẩn hóa vehicle tuple về 6 phần tử (bbox, vtype, color, conf, crop, crop_bbox)."""
+    """Normalize vehicle tuple to 6 elements (bbox, vtype, color, conf, crop, crop_bbox)."""
     if len(vehicle) == 6:
         return vehicle
     if len(vehicle) == 5:
@@ -58,7 +58,7 @@ def normalize_vehicle_tuple(vehicle: tuple):
 
 
 def build_tracking_dets(vehicles: list, vehicle_classes: dict = None):
-    """Xây dựng detection list cho tracker từ vehicles list."""
+    """Build detection list for tracker from vehicles list."""
     if vehicle_classes is None:
         vehicle_classes = {2: "car", 3: "motorcycle", 5: "bus", 7: "truck"}
     dets = []
@@ -70,7 +70,7 @@ def build_tracking_dets(vehicles: list, vehicle_classes: dict = None):
 
 
 def find_matched_vehicle_by_bbox(matched: list, bbox: tuple, min_iou: float = 0.35):
-    """Tìm vehicle matched gần nhất với bbox dựa trên IoU."""
+    """Find the closest matched vehicle to bbox based on IoU."""
     best = None
     best_iou = 0.0
     for item in matched:
@@ -82,7 +82,7 @@ def find_matched_vehicle_by_bbox(matched: list, bbox: tuple, min_iou: float = 0.
 
 
 def find_vehicle_context_by_bbox(vehicles: list, matched: list, bbox: tuple, min_iou: float = 0.20):
-    """Tìm vehicle context (bbox, vtype, color, plate_img, plate_text) từ bbox."""
+    """Find vehicle context (bbox, vtype, color, plate_img, plate_text) from bbox."""
     best_vehicle = None
     best_iou = 0.0
     for vehicle in vehicles:
@@ -109,12 +109,14 @@ def find_vehicle_context_by_bbox(vehicles: list, matched: list, bbox: tuple, min
 
 def has_person_in_crop(recognizer, crop: np.ndarray, min_conf: float = 0.30) -> bool:
     """
-    Kiểm tra xem có người (person) trong crop của xe máy không.
-    Chỉ chạy helmet/no-helmet detection nếu có người thật sự.
+    Check if there is a person in the motorcycle crop.
+    Only run helmet/no-helmet detection if there is actually a person.
     """
+    from backend.src.utils.device_utils import get_device
     try:
+        _device = get_device()
         results = recognizer.yolo_vehicle.predict(
-            crop, device='cpu', classes=[0],  # class 0 = person in COCO
+            crop, device=_device, classes=[0],  # class 0 = person in COCO
             conf=min_conf
         )[0]
         if results.boxes is not None and len(results.boxes) > 0:
@@ -126,13 +128,13 @@ def has_person_in_crop(recognizer, crop: np.ndarray, min_conf: float = 0.30) -> 
 
 def build_hierarchical_violation_map(recognizer, vehicles: list, image: np.ndarray = None, debug: bool = False) -> dict:
     """
-    Gom lỗi vi phạm theo từng xe máy.
+    Group violations by motorcycle.
 
-    Ưu tiên thuật toán full-frame: chạy model lỗi trên toàn ảnh một lần, sau đó
-    gán từng lỗi vào xe máy gần nhất theo tâm đáy. Cách này khớp với mô hình
-    multi-violation và tránh mất lỗi khi crop xe máy không chứa đủ người/ngữ cảnh.
+    Prioritize full-frame algorithm: run violation model on entire image once, then
+    assign each violation to the nearest motorcycle by bottom center. This matches the
+    multi-violation model and avoids missing violations when motorcycle crop doesn't contain enough people/context.
 
-    Nếu không truyền image, fallback về cách crop từng xe để tương thích ngược.
+    If no image is provided, fallback to per-vehicle crop method for backward compatibility.
     """
     vehicle_violation_map = {tuple(normalize_vehicle_tuple(v)[0]): [] for v in vehicles}
 
@@ -155,7 +157,7 @@ def build_hierarchical_violation_map(recognizer, vehicles: list, image: np.ndarr
     return vehicle_violation_map
 
 def merge_violation_data(vehicle_violation_map: dict, vehicles: list, matched: list) -> list:
-    """Gộp dữ liệu vi phạm vào danh sách xe để hiển thị."""
+    """Merge violation data into vehicle list for display."""
     all_violation_data = []
     for vehicle in vehicles:
         bbox, vtype, color, _conf, _crop, _crop_bbox = normalize_vehicle_tuple(vehicle)
@@ -169,8 +171,8 @@ def merge_violation_data(vehicle_violation_map: dict, vehicles: list, matched: l
 
 def assign_violations_to_vehicle_unified(all_violations_global: list, vehicles: list) -> dict:
     """
-    Gán mỗi violation vào xe máy gần nhất theo tâm đáy.
-    Trả về format tuple mà merge_violation_data/main.py đang sử dụng.
+    Assign each violation to the nearest motorcycle by bottom center.
+    Returns tuple format used by merge_violation_data/main.py.
     """
     normalized_vehicles = [normalize_vehicle_tuple(v) for v in vehicles]
     vehicle_violation_map = {tuple(v[0]): [] for v in normalized_vehicles}

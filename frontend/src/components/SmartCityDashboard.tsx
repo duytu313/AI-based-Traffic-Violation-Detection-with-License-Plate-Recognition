@@ -39,7 +39,7 @@ type CameraState = {
 
 function formatTime(value?: string | null) {
   if (!value) return "-";
-  return new Date(value).toLocaleString("vi-VN");
+  return new Date(value).toLocaleString("en-US");
 }
 
 function getHour(value: string) {
@@ -48,19 +48,19 @@ function getHour(value: string) {
 
 function violationLabel(type: string) {
   const labels: Record<string, string> = {
-    WITHOUT_HELMET: "Không đội mũ",
-    MORE_THAN_TWO_PERSONS: "Chở quá người",
-    USING_MOBILE: "Dùng điện thoại",
-    RED_LIGHT_VIOLATION: "Vượt đèn đỏ",
+    WITHOUT_HELMET: "No helmet",
+    MORE_THAN_TWO_PERSONS: "Carrying too many people",
+    USING_MOBILE: "Using mobile phone",
+    RED_LIGHT_VIOLATION: "Red light violation",
   };
   return labels[type] || type;
 }
 
 const cameraLabels: Record<SmartCityCamera, { label: string; location: string }> = {
-  cam1: { label: "CAM 1", location: "Ngã tư chính" },
-  cam2: { label: "CAM 2", location: "Đường vành đai" },
-  cam3: { label: "CAM 3", location: "Khu dân cư" },
-  cam4: { label: "CAM 4", location: "Nút giao thông" },
+  cam1: { label: "CAM 1", location: "Main Intersection" },
+  cam2: { label: "CAM 2", location: "Ring Road" },
+  cam3: { label: "CAM 3", location: "Residential Area" },
+  cam4: { label: "CAM 4", location: "Traffic Junction" },
 };
 
 function CameraMonitor({
@@ -92,7 +92,7 @@ function CameraMonitor({
         </div>
         <span className={`badge text-xs ${state.running ? "bg-emerald-500/10 text-emerald-400" : "bg-slate-700 text-slate-400"}`}>
           <span className={`h-1.5 w-1.5 rounded-full ${state.running ? "bg-emerald-400" : "bg-slate-500"}`} />
-          {state.running ? `${state.fps.toFixed(1)} FPS` : "Tắt"}
+          {state.running ? `${state.fps.toFixed(1)} FPS` : "Off"}
         </span>
       </div>
 
@@ -112,17 +112,17 @@ function CameraMonitor({
         <input
           value={state.source}
           onChange={() => {}}
-          placeholder="Nguồn RTSP / webcam"
+          placeholder="RTSP / webcam source"
           className="col-span-2 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
         />
         <div className="flex items-center justify-center rounded border border-slate-700 bg-slate-900 px-2 py-1 text-slate-300">
-          {state.count} xe
+          {state.count} vehicles
         </div>
       </div>
 
       {state.plate && (
         <div className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-300">
-          <span className="text-slate-500">Biển số: </span>
+          <span className="text-slate-500">License plate: </span>
           {state.plate}
         </div>
       )}
@@ -133,7 +133,7 @@ function CameraMonitor({
           className="inline-flex flex-1 items-center justify-center gap-1 rounded bg-emerald-600 px-2 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-500"
         >
           <Camera className="h-3 w-3" />
-          {state.running ? "Live" : "Bật"}
+          {state.running ? "Live" : "On"}
         </button>
         <button
           onClick={onRefresh}
@@ -294,10 +294,10 @@ export default function SmartCityDashboard() {
   }, [violations]);
 
   const cards = [
-    { label: "Camera đang hoạt động", value: `${runningCameras}/4`, icon: Camera, color: "text-blue-400", bg: "bg-blue-500/10" },
-    { label: "Phương tiện realtime", value: totalDetections, icon: Route, color: "text-cyan-400", bg: "bg-cyan-500/10" },
-    { label: "Giờ cao điểm", value: `${peakHour.hour}:00`, icon: Clock, color: "text-emerald-400", bg: "bg-emerald-500/10" },
-    { label: "Vi phạm ghi nhận", value: stats?.total_violations ?? violations.length, icon: AlertTriangle, color: "text-red-400", bg: "bg-red-500/10" },
+    { label: "Active Cameras", value: `${runningCameras}/4`, icon: Camera, color: "text-blue-400", bg: "bg-blue-500/10" },
+    { label: "Realtime Vehicles", value: totalDetections, icon: Route, color: "text-cyan-400", bg: "bg-cyan-500/10" },
+    { label: "Peak Hour", value: `${peakHour.hour}:00`, icon: Clock, color: "text-emerald-400", bg: "bg-emerald-500/10" },
+    { label: "Violations Recorded", value: stats?.total_violations ?? violations.length, icon: AlertTriangle, color: "text-red-400", bg: "bg-red-500/10" },
   ];
 
   return (
@@ -309,13 +309,13 @@ export default function SmartCityDashboard() {
               <MapIcon className="h-5 w-5 text-blue-400" />
             </div>
             <div>
-              <h2 className="font-bold text-white">Smart City - Quản lý đô thị & giao thông</h2>
-              <p className="text-sm text-slate-400">4 luồng camera realtime, lưu lượng theo giờ, vi phạm và điểm cần can thiệp</p>
+              <h2 className="font-bold text-white">Smart City - Urban & Traffic Management</h2>
+              <p className="text-sm text-slate-400">4 realtime camera streams, hourly traffic flow, violations, and intervention points</p>
             </div>
           </div>
           <button onClick={() => void fetchData()} className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm font-medium text-slate-300 hover:bg-slate-800">
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-            Làm mới dữ liệu thật
+            Refresh real data
           </button>
         </div>
       </div>
@@ -368,8 +368,8 @@ export default function SmartCityDashboard() {
         <section className="card space-y-5">
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="font-semibold text-white">Lưu lượng giao thông theo giờ</h3>
-              <p className="text-sm text-slate-400">Tính từ thời gian vào của phương tiện trong cơ sở dữ liệu</p>
+              <h3 className="font-semibold text-white">Hourly Traffic Flow</h3>
+              <p className="text-sm text-slate-400">Calculated from vehicle entry times in database</p>
             </div>
             <BarChart3 className="h-5 w-5 text-cyan-400" />
           </div>
@@ -380,7 +380,7 @@ export default function SmartCityDashboard() {
                 <div className="h-3 overflow-hidden rounded-full bg-slate-800">
                   <div className="h-full rounded-full bg-cyan-500" style={{ width: `${Math.max(2, (item.count / maxFlow) * 100)}%` }} />
                 </div>
-                <span className="text-right text-slate-300">{item.count} xe</span>
+                <span className="text-right text-slate-300">{item.count} vehicles</span>
               </div>
             ))}
           </div>
@@ -388,11 +388,11 @@ export default function SmartCityDashboard() {
 
         <section className="card space-y-5">
           <div>
-            <h3 className="font-semibold text-white">Cơ cấu vi phạm</h3>
-            <p className="text-sm text-slate-400">Phân nhóm theo loại vi phạm đã ghi nhận</p>
+              <h3 className="font-semibold text-white">Violation Breakdown</h3>
+              <p className="text-sm text-slate-400">Grouped by recorded violation type</p>
           </div>
           {violationsByType.length === 0 ? (
-            <div className="rounded-lg border border-slate-700 bg-slate-900 p-4 text-sm text-slate-400">Chưa có dữ liệu vi phạm</div>
+            <div className="rounded-lg border border-slate-700 bg-slate-900 p-4 text-sm text-slate-400">No violation data available</div>
           ) : violationsByType.map((item) => (
             <div key={item.type} className="rounded-lg border border-slate-700 bg-slate-900 p-3">
               <div className="flex items-center justify-between gap-3">
@@ -407,8 +407,8 @@ export default function SmartCityDashboard() {
       <div className="card overflow-hidden p-0">
         <div className="flex items-center justify-between border-b border-slate-700/50 p-4">
           <div>
-            <h3 className="font-semibold text-white">Sự kiện vi phạm mới nhất</h3>
-            <p className="text-sm text-slate-400">Phát hiện đi sai quy định, vượt đèn đỏ, hành vi nguy hiểm</p>
+              <h3 className="font-semibold text-white">Latest Violation Events</h3>
+              <p className="text-sm text-slate-400">Detected rule violations, red light running, dangerous behavior</p>
           </div>
           <TrafficCone className="h-5 w-5 text-yellow-400" />
         </div>
@@ -416,20 +416,20 @@ export default function SmartCityDashboard() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-700/50">
-                <th className="p-3 text-left font-medium text-slate-400">Loại</th>
-                <th className="p-3 text-left font-medium text-slate-400">Biển số</th>
-                <th className="p-3 text-left font-medium text-slate-400">Phương tiện</th>
-                <th className="p-3 text-left font-medium text-slate-400">Chi tiết</th>
-                <th className="p-3 text-left font-medium text-slate-400">Thời gian</th>
+                <th className="p-3 text-left font-medium text-slate-400">Type</th>
+                <th className="p-3 text-left font-medium text-slate-400">License Plate</th>
+                <th className="p-3 text-left font-medium text-slate-400">Vehicle</th>
+                <th className="p-3 text-left font-medium text-slate-400">Details</th>
+                <th className="p-3 text-left font-medium text-slate-400">Time</th>
               </tr>
             </thead>
             <tbody>
               {violations.length === 0 ? (
-                <tr><td colSpan={5} className="p-8 text-center text-slate-500">Chưa có sự kiện vi phạm</td></tr>
+                <tr><td colSpan={5} className="p-8 text-center text-slate-500">No violation events recorded</td></tr>
               ) : violations.slice(0, 20).map((item) => (
                 <tr key={item.id} className="border-b border-slate-800/50 hover:bg-slate-800/30">
                   <td className="p-3"><span className="badge bg-red-500/10 text-red-400">{violationLabel(item.violation_type)}</span></td>
-                  <td className="p-3 text-slate-300">{item.license_plate || "Chưa định danh"}</td>
+                  <td className="p-3 text-slate-300">{item.license_plate || "Unidentified"}</td>
                   <td className="p-3 text-slate-300">{item.vehicle_type || "-"}</td>
                   <td className="p-3 text-slate-300">{item.details}</td>
                   <td className="p-3 text-slate-300">{formatTime(item.timestamp)}</td>

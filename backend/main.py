@@ -7,13 +7,14 @@ import sys
 import cv2
 import time
 import json
+from datetime import datetime
 import numpy as np
 import tempfile
 import threading
 import uvicorn
 from fastapi import FastAPI, File, UploadFile, Form, Query, HTTPException, Body, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
+from fastapi.responses import JSONResponse, FileResponse, StreamingResponse, Response
 from fastapi.staticfiles import StaticFiles
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel
@@ -42,6 +43,7 @@ from backend.src.utils.image_utils import (
     build_hierarchical_violation_map, merge_violation_data
 )
 from backend.src.utils.notifications import send_telegram_notification, send_violation_telegram
+from backend.src.utils.device_utils import get_device
 
 # Import models directly (without Streamlit decorator)
 from ultralytics import YOLO
@@ -66,21 +68,39 @@ except Exception as e:
     print(f"Warning: Cannot load helmet model: {e}")
     helmet_model = None
 try:
-    traffic_light_model = YOLO(os.path.join(MODEL_DIR, "light_traffic.pt"))
+    traffic_light_model = YOLO(os.path.join(MODEL_DIR, "traffic_light.pt"))
 except Exception as e:
     print(f"Warning: Cannot load traffic light model: {e}")
     traffic_light_model = None
 ocr_engine = FastPlateOCR(hub_ocr_model='cct-s-v2-global-model', device='auto')
 
+# Move models to GPU if available
+_main_device = get_device()
+if _main_device != 'cpu':
+    try:
+        yolo_plate.to(_main_device)
+        yolo_vehicle.to(_main_device)
+        if color_model is not None:
+            color_model.to(_main_device)
+        if helmet_model is not None:
+            helmet_model.to(_main_device)
+        if traffic_light_model is not None:
+            traffic_light_model.to(_main_device)
+        print(f"[Device] Models moved to {_main_device}")
+    except Exception as e:
+        print(f"Warning: Could not move models to {_main_device}: {e}")
+
 from backend.src.core.engine import LicensePlateRecognizer as LPR
 from backend.src.core.zones import ZoneConfig
 from backend.src.core.roi_detector import ROIDetector, ROIConfig
+from backend.src.core.birds_eye_detector import BirdsEyeRedLightDetector, BEVConfig
 # Monkey-patch LicensePlateRecognizer for non-Streamlit env
 class LicensePlateRecognizer(LPR):
     def detect_vehicles(self, image, debug=False):
         from ultralytics import YOLO
+        _device = get_device()
         results = self.yolo_vehicle.predict(
-            image, device='cpu', classes=list(self.vehicle_classes.keys()),
+            image, device=_device, classes=list(self.vehicle_classes.keys()),
             conf=self.vehicle_conf
         )[0]
         vehicles = []
@@ -175,14 +195,14 @@ def set_zone_config(
     intersection_end: Optional[int] = Form(None),
 ):
     """
-    Cập nhật cấu hình vùng cho zone-based red light detection.
+    Update zone configuration for zone-based red light detection.
     
-    Các tham số:
-      - waiting_end: pixel Y cuối của vùng chờ (mặc định: 200)
-      - stop_start: pixel Y bắt đầu vùng dừng (mặc định: bằng waiting_end)
-      - stop_end: pixel Y kết thúc vùng dừng (mặc định: 300)
-      - intersection_start: pixel Y bắt đầu giao lộ (mặc định: bằng stop_end)
-      - intersection_end: pixel Y kết thúc giao lộ (mặc định: 500)
+    Parameters:
+      - waiting_end: Y pixel of waiting zone end (default: 200)
+      - stop_start: Y pixel of stop zone start (default: equal to waiting_end)
+      - stop_end: Y pixel of stop zone end (default: 300)
+      - intersection_start: Y pixel of intersection start (default: equal to stop_end)
+      - intersection_end: Y pixel of intersection end (default: 500)
     """
     kwargs = {}
     if waiting_end is not None:
@@ -202,20 +222,20 @@ def set_zone_config(
 
 @app.get("/api/zone-config")
 def get_zone_config():
-    """Lấy cấu hình vùng hiện tại."""
+    """Get current zone configuration."""
     stats = recognizer.get_zone_stats()
     return {"zone_config": stats["zone_config"]}
 
 @app.get("/api/zone-stats")
 def get_zone_stats():
-    """Lấy thống kê zone detector."""
+    """Get zone detector statistics."""
     return recognizer.get_zone_stats()
 
 @app.post("/api/zone-reset")
 def reset_zone_detector():
-    """Reset zone detector về trạng thái ban đầu."""
+    """Reset zone detector to initial state."""
     recognizer.reset_zone_detector()
-    return {"status": "ok", "message": "Zone detector đã được reset"}
+    return {"status": "ok", "message": "Zone detector has been reset"}
 
 
 # ======================== ROI (REGION OF INTEREST) API ========================
@@ -223,11 +243,11 @@ def reset_zone_detector():
 @app.post("/api/roi/set")
 async def set_roi(request: Request):
     """
-    Cập nhật vùng ROI (Region of Interest) cho phát hiện vi phạm.
+    Update ROI (Region of Interest) zone for violation detection.
     
-    Body JSON:
-        points: List các điểm [{"x": 100, "y": 200}, ...]
-        name: Tên vùng ROI (optional, default: "violation_zone")
+    Request Body JSON:
+        points: List of points [{"x": 100, "y": 200}, ...]
+        name: ROI zone name (optional, default: "violation_zone")
     """
     data = await request.json()
     points = data.get("points", [])
@@ -240,27 +260,92 @@ async def set_roi(request: Request):
 
 @app.get("/api/roi/get")
 def get_roi():
-    """Lấy cấu hình ROI hiện tại."""
+    """Get current ROI configuration."""
     config = roi_detector.get_config()
     return {"roi_config": config}
 
 @app.post("/api/roi/clear")
 def clear_roi():
-    """Xóa vùng ROI."""
+    """Clear ROI zone."""
     roi_detector.clear_roi()
-    return {"status": "ok", "message": "ROI đã được xóa"}
+    return {"status": "ok", "message": "ROI has been cleared"}
 
 @app.post("/api/roi/detect")
 def detect_roi_violations(request: ROIDetectRequest):
     """
-    Phát hiện vi phạm trong ROI.
+    Detect violations in ROI.
     
     Args:
-        request.body.vehicles: List các xe với bbox, track_id, class_name, conf
-        request.body.red_light_active: True nếu đèn đỏ đang bật
+        request.body.vehicles: List of vehicles with bbox, track_id, class_name, conf
+        request.body.red_light_active: True if red light is active
     """
     violations = roi_detector.process_vehicles(request.vehicles, request.red_light_active)
     return {"violations": violations}
+
+
+# ======================== BIRD'S EYE VIEW (BEV) RED LIGHT DETECTION API ========================
+
+# Global BEV detector instance
+bev_detector = BirdsEyeRedLightDetector()
+
+@app.post("/api/bev/config")
+async def set_bev_config(request: Request):
+    """
+    Update BEV detector configuration.
+    
+    Request Body JSON:
+        src_points: List of 4 source points [[x,y], ...] or [{x:100, y:200}, ...] (trapezoid in image space)
+        dst_points: List of 4 destination points [[x,y], ...] or [{x:100, y:200}, ...] (rectangle in BEV space)
+        stop_line_3d_y: Stop line position in BEV space (Y coordinate)
+        red_light_buffer_frames: Number of buffer frames for red light
+    """
+    data = await request.json()
+    
+    if "src_points" in data:
+        # Handle both [{x, y}, ...] and [[x, y], ...] formats
+        src_points = data["src_points"]
+        if src_points and isinstance(src_points[0], dict):
+            pts = np.array([[p["x"], p["y"]] for p in src_points], dtype=np.float32)
+        else:
+            pts = np.array(src_points, dtype=np.float32)
+        bev_detector.set_src_points(pts)
+    
+    if "dst_points" in data:
+        # Handle both [{x, y}, ...] and [[x, y], ...] formats
+        dst_points = data["dst_points"]
+        if dst_points and isinstance(dst_points[0], dict):
+            pts = np.array([[p["x"], p["y"]] for p in dst_points], dtype=np.float32)
+        else:
+            pts = np.array(dst_points, dtype=np.float32)
+        bev_detector.set_dst_points(pts)
+    
+    if "stop_line_3d_y" in data:
+        bev_detector.set_stop_line_3d_y(int(data["stop_line_3d_y"]))
+    
+    if "red_light_buffer_frames" in data:
+        bev_detector.set_red_light_buffer_frames(int(data["red_light_buffer_frames"]))
+    
+    # Invalidate cached frames so BEV zone redraws immediately
+    with camera_stream.lock:
+        camera_stream._last_frame = None
+    
+    return {"status": "ok", "config": bev_detector.get_stats()}
+
+@app.get("/api/bev/config")
+def get_bev_config():
+    """Get current BEV detector configuration."""
+    return {"config": bev_detector.get_stats()}
+
+@app.post("/api/bev/reset")
+def reset_bev_detector():
+    """Reset BEV detector to initial state."""
+    bev_detector.reset()
+    return {"status": "ok", "message": "BEV detector has been reset"}
+
+@app.get("/api/bev/stats")
+def get_bev_stats():
+    """Get BEV detector statistics."""
+    return bev_detector.get_stats()
 
 
 @app.post("/api/process-image")
@@ -268,6 +353,7 @@ async def process_image(
     file: UploadFile = File(...),
     enable_violation_detection: bool = Form(True),
     enable_red_light_detection: bool = Form(False),
+    enable_bev_detection: bool = Form(True),
     violation_conf_limit: float = Form(0.15),
     conf_more_than_two: float = Form(0.50),
     conf_no_helmet: float = Form(0.15),
@@ -275,6 +361,7 @@ async def process_image(
     traffic_light_conf: float = Form(0.25),
     debug: bool = Form(False),
     show_zones: bool = Form(False),
+    show_bev: bool = Form(True),
     camera_direction: str = Form("down"),
 ):
     """Process a single image and return detection results."""
@@ -759,10 +846,18 @@ class CameraStream:
             # Store raw frame immediately for instant display
             with self.lock:
                 self._raw_frame = frame.copy()
-                
-                # If we have a last processed frame, composite overlay on raw frame
-                if self._last_frame is not None and self._processing_frame is not frame:
-                    pass  # Keep showing last processed overlays
+                # Draw BEV zone on raw frame if configured
+                try:
+                    pts = bev_detector.config.src_points.astype(np.int32)
+                    if np.any(pts != 0):
+                        cv2.polylines(self._raw_frame, [pts], True, (0, 0, 255), 2)
+                        try:
+                            left, right = bev_detector.get_stop_line_2d()
+                            cv2.line(self._raw_frame, left, right, (0, 152, 255), 2)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
             
             # FPS tracking
             self.frame_count += 1
@@ -870,6 +965,18 @@ class CameraStream:
                 })
             roi_violations = roi_detector.process_vehicles(vehicle_list, red_light_active=True)
 
+        # Bird's Eye View (BEV) red light detection (like Colab)
+        bev_detector.update_red_light(camera_traffic_lights)
+        
+        for trk_id, bbox, cls_id, conf in tracked:
+            x1, y1, x2, y2 = bbox
+            class_name = recognizer.vehicle_classes.get(cls_id, "vehicle")
+            bev_result = bev_detector.process_vehicle(trk_id, class_name, (x1, y1, x2, y2))
+            
+            if bev_result["first_time_violation"]:
+                current_time = datetime.now().strftime("%H:%M:%S")
+                print(f"[{current_time}] 🔴 BEV: Vehicle {bev_result['unique_key'].upper()} crossed 3D boundary at red light!")
+
         current_displayed_plate_texts = {item[2] for item in self.detected_items}
         current_displayed_violations = {f"{item[1]}_{item[2]}" for item in self.violation_items}
 
@@ -935,7 +1042,7 @@ class CameraStream:
                         "track_id": trk_id,
                         "vehicle_type": vtype,
                         "color": color,
-                        "message": f"Phát hiện xe lạ: {color} {vtype} (không có biển số)",
+                        "message": f"Unknown vehicle detected: {color} {vtype} (no license plate)",
                     }
                     self.unknown_vehicle_alerts.append(alert_info)
                     if len(self.unknown_vehicle_alerts) > 50:
@@ -979,17 +1086,21 @@ class CameraStream:
             cv2.rectangle(frame, (x1, y1), (x2, y2), color_box, 1)
             cv2.putText(frame, f"ID:{trk_id}", (x1, y1-3), cv2.FONT_HERSHEY_SIMPLEX, 0.35, color_box, 1)
 
+        # Bird's Eye View (BEV) - draw all overlays like Colab
+        # Draw: yellow trapezoid, camera stop line, VIOLATION/WAITING labels, light status
+        frame = bev_detector.draw_all(frame, tracked, recognizer.vehicle_classes)
+
         # Draw ROI violations
         for viol in roi_violations:
             vx1, vy1, vx2, vy2 = viol['bbox']
             cv2.rectangle(frame, (vx1, vy1), (vx2, vy2), (0, 0, 255), 2)
-            label = f"VUOT DEN DO (ROI) {viol['conf']*100:.1f}%"
+            label = f"RED LIGHT RUNNING (ROI) {viol['conf']*100:.1f}%"
             cv2.putText(frame, label, (vx1, vy1-5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
 
         # Red light status indicator
         if roi_config is not None:
             light_color = (0, 0, 255) if red_light_active else (0, 255, 0)
-            light_label = "DEN DO" if red_light_active else "DEN XANH"
+            light_label = "RED LIGHT" if red_light_active else "GREEN LIGHT"
             cv2.circle(frame, (30, 60), 10, light_color, -1)
             cv2.putText(frame, light_label, (50, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.5, light_color, 2)
 
@@ -1001,11 +1112,12 @@ class CameraStream:
 
     def get_last_frame(self):
         with self.lock:
-            # Always return latest raw frame for instant display
-            if self._raw_frame is not None:
-                return self._raw_frame
-            # Fallback to processed frame
-            return self._last_frame
+            # Return processed frame which has ALL overlays: BEV zone, vehicles, violations
+            # _last_frame contains full detection results (violations, tracking, etc.)
+            if self._last_frame is not None:
+                return self._last_frame
+            # Fallback to raw frame if processed frame not ready yet
+            return self._raw_frame
 
 
 # ======================== VIDEO STREAMING ========================
@@ -1149,6 +1261,18 @@ class VideoStreamProcessor:
         # Always detect traffic lights for drawing
         video_traffic_lights, video_traffic_road_users = recognizer.detect_traffic_scene(frame)
 
+        # Bird's Eye View (BEV) red light detection for video stream (like Colab)
+        bev_detector.update_red_light(video_traffic_lights)
+        
+        for trk_id, bbox, cls_id, conf in tracked:
+            x1, y1, x2, y2 = bbox
+            class_name = recognizer.vehicle_classes.get(cls_id, "vehicle")
+            bev_result = bev_detector.process_vehicle(trk_id, class_name, (x1, y1, x2, y2))
+            
+            if bev_result["first_time_violation"]:
+                current_time = datetime.now().strftime("%H:%M:%S")
+                print(f"[{current_time}] 🔴 BEV (Video): Vehicle {bev_result['unique_key'].upper()} crossed 3D boundary at red light!")
+
         # Store detected items with crops
         for trk_id, bbox, cls_id, conf in tracked:
             x1, y1, x2, y2 = bbox
@@ -1168,6 +1292,11 @@ class VideoStreamProcessor:
 
         # Draw
         img_draw = frame.copy()
+
+        # Bird's Eye View (BEV) - draw all overlays like Colab
+        # Draw: yellow trapezoid, camera stop line, VIOLATION/WAITING labels, light status
+        # (bev_detector.update_red_light has been called above)
+        img_draw = bev_detector.draw_all(img_draw, tracked, recognizer.vehicle_classes)
 
         # Draw ROI zone
         if roi_config is not None:
@@ -1220,13 +1349,13 @@ class VideoStreamProcessor:
         for viol in roi_violations:
             vx1, vy1, vx2, vy2 = viol['bbox']
             cv2.rectangle(img_draw, (vx1, vy1), (vx2, vy2), (0, 0, 255), 2)
-            label = f"VUOT DEN DO (ROI) {viol['conf']*100:.1f}%"
+            label = f"RED LIGHT RUNNING (ROI) {viol['conf']*100:.1f}%"
             cv2.putText(img_draw, label, (vx1, vy1-5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
 
         # Red light status indicator
         if roi_config is not None:
             light_color = (0, 0, 255) if red_light_active else (0, 255, 0)
-            light_label = "DEN DO" if red_light_active else "DEN XANH"
+            light_label = "RED LIGHT" if red_light_active else "GREEN LIGHT"
             cv2.circle(img_draw, (30, 60), 10, light_color, -1)
             cv2.putText(img_draw, light_label, (50, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.5, light_color, 2)
 
@@ -1295,7 +1424,8 @@ async def stop_video_stream():
 async def get_video_frame():
     frame = video_stream.get_last_frame()
     if frame is None:
-        raise HTTPException(status_code=404, detail="No frame available")
+        # Return empty response instead of 404 to avoid frontend polling errors
+        return Response(content=b"", media_type="image/jpeg")
     _, buffer = cv2.imencode('.jpg', frame)
     return StreamingResponse(
         iter([buffer.tobytes()]),
@@ -1536,8 +1666,8 @@ def get_detected():
     return {"vehicles": vehicles, "violations": violations}
 
 
-# ======================== LOGISTICS (KHO VẬN) CAMERAS ========================
-# 2 cameras: gate (cổng ra vào) and construction_site (công trường)
+# ======================== LOGISTICS CAMERAS ========================
+# 2 cameras: gate (entry/exit) and construction_site (construction site)
 
 logistics_streams = {
     "gate": CameraStream(),
@@ -1657,7 +1787,7 @@ def get_logistics_camera_detected(camera: str):
     }
 
 
-# ======================== SMART CITY (ĐÔ THỊ) CAMERAS ========================
+# ======================== SMART CITY CAMERAS ========================
 # 4 cameras for urban traffic monitoring
 
 smartcity_streams = {

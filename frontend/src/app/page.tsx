@@ -38,9 +38,9 @@ export default function Home() {
             <div className="mb-6 flex items-start gap-3 rounded-lg border border-yellow-500/20 bg-yellow-500/10 p-4">
               <div className="mt-2 h-2 w-2 shrink-0 animate-pulse rounded-full bg-yellow-400" />
               <div>
-                <p className="text-sm font-medium text-yellow-300">Đang chờ kết nối đến API server...</p>
+                <p className="text-sm font-medium text-yellow-300">Waiting for API server connection...</p>
                 <p className="mt-1 text-xs text-yellow-400/60">
-                  Hãy đảm bảo backend server đang chạy tại {process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}
+                  Please ensure the backend server is running at {process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}
                 </p>
               </div>
             </div>

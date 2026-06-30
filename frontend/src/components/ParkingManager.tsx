@@ -48,16 +48,16 @@ type GateState = {
 };
 
 const statusMeta: Record<SlotStatus, { label: string; className: string; dot: string }> = {
-  occupied: { label: "Đang đỗ", className: "border-blue-500/40 bg-blue-500/10 text-blue-300", dot: "bg-blue-400" },
-  reserved: { label: "Đã đặt", className: "border-yellow-500/40 bg-yellow-500/10 text-yellow-300", dot: "bg-yellow-400" },
-  available: { label: "Còn trống", className: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300", dot: "bg-emerald-400" },
-  maintenance: { label: "Bảo trì", className: "border-slate-600 bg-slate-700/40 text-slate-400", dot: "bg-slate-500" },
+  occupied: { label: "Occupied", className: "border-blue-500/40 bg-blue-500/10 text-blue-300", dot: "bg-blue-400" },
+  reserved: { label: "Reserved", className: "border-yellow-500/40 bg-yellow-500/10 text-yellow-300", dot: "bg-yellow-400" },
+  available: { label: "Available", className: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300", dot: "bg-emerald-400" },
+  maintenance: { label: "Maintenance", className: "border-slate-600 bg-slate-700/40 text-slate-400", dot: "bg-slate-500" },
 };
 
 const vehicleLabels: Record<string, string> = {
-  car: "Ô tô",
-  motorcycle: "Xe máy",
-  truck: "Xe tải",
+  car: "Car",
+  motorcycle: "Motorcycle",
+  truck: "Truck",
 };
 
 const initialGates: Record<GateType, GateState> = {
@@ -69,7 +69,7 @@ const initialGates: Record<GateType, GateState> = {
     running: false,
     fps: 0,
     status: "ready",
-    message: "Sẵn sàng xử lý",
+    message: "Ready to process",
   },
   exit: {
     source: "1",
@@ -79,7 +79,7 @@ const initialGates: Record<GateType, GateState> = {
     running: false,
     fps: 0,
     status: "ready",
-    message: "Sẵn sàng xử lý",
+    message: "Ready to process",
   },
 };
 
@@ -117,8 +117,8 @@ function GateMonitor({
   onRefresh: () => void;
 }) {
   const isEntry = type === "entry";
-  const title = isEntry ? "Cổng vào" : "Cổng ra";
-  const actionText = isEntry ? "Xác nhận cho vào" : "Xác nhận cho ra";
+  const title = isEntry ? "Entry Gate" : "Exit Gate";
+  const actionText = isEntry ? "Confirm entry" : "Confirm exit";
   const Icon = isEntry ? LogIn : LogOut;
 
   return (
@@ -130,12 +130,12 @@ function GateMonitor({
           </div>
           <div>
             <h3 className="font-semibold text-white">{title}</h3>
-            <p className="text-sm text-slate-400">Xử lí biển số realtime</p>
+            <p className="text-sm text-slate-400">Realtime license plate processing</p>
           </div>
         </div>
         <span className={`${state.running ? "bg-emerald-500/10 text-emerald-400" : "bg-slate-700 text-slate-400"} badge`}>
           <span className={`h-1.5 w-1.5 rounded-full ${state.running ? "bg-emerald-400" : "bg-slate-500"}`} />
-          {state.running ? `Live ${state.fps.toFixed(1)} FPS` : "Tạm dừng"}
+          {state.running ? `Live ${state.fps.toFixed(1)} FPS` : "Paused"}
         </span>
       </div>
 
@@ -154,11 +154,11 @@ function GateMonitor({
         <div className="absolute bottom-5 left-5 right-5 rounded-lg border border-slate-600/80 bg-slate-950/80 p-3 backdrop-blur">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="text-xs text-slate-400">Biển số nhận diện</p>
-              <p className="mt-1 text-2xl font-bold tracking-wide text-white">{state.plate || "Đang chờ..."}</p>
+               <p className="text-xs text-slate-400">Recognized license plate</p>
+               <p className="mt-1 text-2xl font-bold tracking-wide text-white">{state.plate || "Waiting..."}</p>
             </div>
             <div className="text-right">
-              <p className="text-xs text-slate-400">Độ tin cậy</p>
+               <p className="text-xs text-slate-400">Confidence</p>
               <p className="mt-1 text-lg font-semibold text-cyan-300">{state.confidence}%</p>
             </div>
           </div>
@@ -167,7 +167,7 @@ function GateMonitor({
 
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="space-y-1.5">
-          <span className="text-xs font-medium text-slate-400">Nguồn camera</span>
+          <span className="text-xs font-medium text-slate-400">Camera source</span>
           <input
             value={state.source}
             onChange={(event) => onChange({ ...state, source: event.target.value })}
@@ -175,7 +175,7 @@ function GateMonitor({
           />
         </label>
         <label className="space-y-1.5">
-          <span className="text-xs font-medium text-slate-400">Biển số</span>
+          <span className="text-xs font-medium text-slate-400">License plate</span>
           <input
             value={state.plate}
             onChange={(event) => onChange({ ...state, plate: event.target.value.toUpperCase() })}
@@ -186,15 +186,15 @@ function GateMonitor({
 
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="rounded-lg border border-slate-700 bg-slate-900 p-3">
-          <p className="text-xs text-slate-500">Loại xe</p>
+          <p className="text-xs text-slate-500">Vehicle type</p>
           <p className="mt-1 text-sm font-medium text-white">{vehicleLabels[state.vehicleType] || state.vehicleType}</p>
         </div>
         <div className="rounded-lg border border-slate-700 bg-slate-900 p-3">
-          <p className="text-xs text-slate-500">Ô liên quan</p>
+          <p className="text-xs text-slate-500">Related slot</p>
           <p className="mt-1 text-sm font-medium text-white">{state.slot ?? "-"}</p>
         </div>
         <div className="rounded-lg border border-slate-700 bg-slate-900 p-3">
-          <p className="text-xs text-slate-500">Phí</p>
+          <p className="text-xs text-slate-500">Fee</p>
           <p className="mt-1 text-sm font-medium text-white">{formatCurrency(state.fee ?? 0)}</p>
         </div>
       </div>
@@ -212,14 +212,14 @@ function GateMonitor({
           className={`inline-flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white transition-colors ${isEntry ? "bg-emerald-600 hover:bg-emerald-500" : "bg-blue-600 hover:bg-blue-500"}`}
         >
           <Icon className="h-4 w-4" />
-          {state.running ? actionText : "Bắt đầu xử lí"}
+          {state.running ? actionText : "Start processing"}
         </button>
         <button onClick={onRefresh} className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm font-medium text-slate-300 hover:bg-slate-800 transition-colors">
           <RefreshCw className="h-4 w-4" />
-          Đọc lại
+          Refresh
         </button>
         <button onClick={onStop} className="inline-flex items-center justify-center rounded-lg border border-slate-700 px-3 py-2 text-sm font-medium text-slate-300 hover:bg-slate-800 transition-colors">
-          Dừng
+          Stop
         </button>
       </div>
     </section>
@@ -335,7 +335,7 @@ export default function ParkingManager() {
   const handleStart = async (gate: GateType) => {
     setGates((current) => ({
       ...current,
-      [gate]: { ...current[gate], status: "processing", message: "Đang kết nối camera..." },
+      [gate]: { ...current[gate], status: "processing", message: "Connecting to camera..." },
     }));
     try {
       await startParkingGate(gate, gates[gate].source);
@@ -346,7 +346,7 @@ export default function ParkingManager() {
         [gate]: {
           ...current[gate],
           status: "warning",
-          message: "Không mở được camera. Kiểm tra lại nguồn RTSP/webcam.",
+          message: "Cannot open camera. Check RTSP/webcam source.",
         },
       }));
     }
@@ -356,7 +356,7 @@ export default function ParkingManager() {
     await stopParkingGate(gate);
     setGates((current) => ({
       ...current,
-      [gate]: { ...current[gate], running: false, fps: 0, message: "Đã dừng luồng camera" },
+      [gate]: { ...current[gate], running: false, fps: 0, message: "Camera stream stopped" },
     }));
   };
 
@@ -389,8 +389,8 @@ export default function ParkingManager() {
               <Car className="w-5 h-5 text-cyan-400" />
             </div>
             <div>
-              <h2 className="font-bold text-white">Quản lí bãi đỗ xe thông minh</h2>
-              <p className="text-sm text-slate-400">Dữ liệu thật từ database parking.db - {slots.length} ô đỗ</p>
+              <h2 className="font-bold text-white">Smart Parking Lot Management</h2>
+              <p className="text-sm text-slate-400">Real data from parking.db database - {slots.length} parking slots</p>
             </div>
           </div>
           <div className="flex items-center gap-2 text-sm text-slate-400">
@@ -425,31 +425,31 @@ export default function ParkingManager() {
             <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
               <Car className="w-5 h-5 text-blue-400" />
             </div>
-            <span className="text-xs text-slate-500">{occupancyRate}% sử dụng</span>
+            <span className="text-xs text-slate-500">{occupancyRate}% in use</span>
           </div>
           <p className="mt-4 text-3xl font-bold text-white">{loading ? "..." : occupied}</p>
-          <p className="text-sm text-slate-400">Xe đang gửi</p>
+          <p className="text-sm text-slate-400">Vehicles currently parked</p>
         </div>
         <div className="card">
           <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
             <CheckCircle2 className="w-5 h-5 text-emerald-400" />
           </div>
           <p className="mt-4 text-3xl font-bold text-white">{loading ? "..." : available}</p>
-          <p className="text-sm text-slate-400">Ô còn trống</p>
+          <p className="text-sm text-slate-400">Available slots</p>
         </div>
         <div className="card">
           <div className="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center">
             <AlertTriangle className="w-5 h-5 text-red-400" />
           </div>
           <p className="mt-4 text-3xl font-bold text-white">{loading ? "..." : alerts}</p>
-          <p className="text-sm text-slate-400">Cảnh báo cần xử lí</p>
+          <p className="text-sm text-slate-400">Alerts requiring attention</p>
         </div>
         <div className="card">
           <div className="w-10 h-10 rounded-lg bg-cyan-500/10 flex items-center justify-center">
             <WalletCards className="w-5 h-5 text-cyan-400" />
           </div>
           <p className="mt-4 text-3xl font-bold text-white">{loading ? "..." : formatCurrency(revenue)}</p>
-          <p className="text-sm text-slate-400">Doanh thu tạm tính</p>
+          <p className="text-sm text-slate-400">Estimated revenue</p>
         </div>
       </div>
 
@@ -457,8 +457,8 @@ export default function ParkingManager() {
         <div className="card space-y-5">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <h3 className="font-semibold text-white">Sơ đồ bãi đỗ</h3>
-              <p className="text-sm text-slate-400">Dữ liệu thật từ database parking_slots</p>
+              <h3 className="font-semibold text-white">Parking Lot Layout</h3>
+              <p className="text-sm text-slate-400">Real data from parking_slots database</p>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row">
               <div className="relative">
@@ -466,7 +466,7 @@ export default function ParkingManager() {
                 <input
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Tìm ô hoặc biển số"
+                  placeholder="Search slot or license plate"
                   className="w-full rounded-lg border border-slate-700 bg-slate-900 py-2 pl-9 pr-3 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 sm:w-56"
                 />
               </div>
@@ -477,7 +477,7 @@ export default function ParkingManager() {
               >
                 {zones.map((zone) => (
                   <option key={zone} value={zone}>
-                    {zone === "all" ? "Tất cả khu" : `Khu ${zone}`}
+                    {zone === "all" ? "All zones" : `Zone ${zone}`}
                   </option>
                 ))}
               </select>
@@ -487,7 +487,7 @@ export default function ParkingManager() {
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
             {filteredSlots.length === 0 ? (
               <div className="col-span-full py-8 text-center text-sm text-slate-500">
-                {loading ? "Đang tải dữ liệu..." : "Không có ô đỗ nào"}
+                {loading ? "Loading data..." : "No parking slots available"}
               </div>
             ) : filteredSlots.map((slot) => {
               const meta = statusMeta[slot.status as SlotStatus] || statusMeta.available;
@@ -514,8 +514,8 @@ export default function ParkingManager() {
             <>
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="font-semibold text-white">Chi tiết ô {selectedSlot.id}</h3>
-                  <p className="text-sm text-slate-400">Khu {selectedSlot.zone}</p>
+                  <h3 className="font-semibold text-white">Slot {selectedSlot.id} Details</h3>
+                  <p className="text-sm text-slate-400">Zone {selectedSlot.zone}</p>
                 </div>
                 <span className={`badge ${(statusMeta[selectedSlot.status as SlotStatus] || statusMeta.available).className}`}>
                   {(statusMeta[selectedSlot.status as SlotStatus] || statusMeta.available).label}
@@ -523,31 +523,31 @@ export default function ParkingManager() {
               </div>
               <div className="space-y-3 text-sm">
                 <div className="flex items-center justify-between border-b border-slate-700/60 pb-3">
-                  <span className="text-slate-400">Biển số</span>
-                  <span className="font-medium text-white">{selectedSlot.current_plate ?? "Chưa có xe"}</span>
+                  <span className="text-slate-400">License plate</span>
+                  <span className="font-medium text-white">{selectedSlot.current_plate ?? "No vehicle"}</span>
                 </div>
                 <div className="flex items-center justify-between border-b border-slate-700/60 pb-3">
-                  <span className="text-slate-400">Loại xe</span>
+                  <span className="text-slate-400">Vehicle type</span>
                   <span className="text-slate-200">{selectedSlot.vehicle_type ? (vehicleLabels[selectedSlot.vehicle_type] || selectedSlot.vehicle_type) : "-"}</span>
                 </div>
                 <div className="flex items-center justify-between border-b border-slate-700/60 pb-3">
-                  <span className="text-slate-400">Giờ vào</span>
+                  <span className="text-slate-400">Entry time</span>
                   <span className="text-slate-200">{formatTime(selectedSlot.entry_time)}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-slate-400">Phí tạm tính</span>
+                  <span className="text-slate-400">Estimated fee</span>
                   <span className="font-semibold text-cyan-300">{formatCurrency(selectedSlot.fee || 0)}</span>
                 </div>
               </div>
               <div className={`rounded-lg border p-3 text-sm ${selectedSlot.status === "maintenance" ? "border-red-500/30 bg-red-500/10 text-red-200" : "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"}`}>
                 <div className="flex items-center gap-2 font-medium">
                   {selectedSlot.status === "maintenance" ? <AlertTriangle className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
-                  {selectedSlot.status === "maintenance" ? "Cần bảo trì" : "Trạng thái bình thường"}
+                  {selectedSlot.status === "maintenance" ? "Maintenance required" : "Normal status"}
                 </div>
               </div>
             </>
           ) : (
-            <div className="py-8 text-center text-sm text-slate-500">Chọn một ô để xem chi tiết</div>
+            <div className="py-8 text-center text-sm text-slate-500">Select a slot to view details</div>
           )}
         </aside>
       </div>
@@ -555,8 +555,8 @@ export default function ParkingManager() {
       <div className="card p-0 overflow-hidden">
         <div className="flex items-center justify-between border-b border-slate-700/50 p-4">
           <div>
-            <h3 className="font-semibold text-white">Phiên gửi xe đang hoạt động</h3>
-            <p className="text-sm text-slate-400">Dữ liệu thật từ database parking_entries</p>
+            <h3 className="font-semibold text-white">Active Parking Sessions</h3>
+            <p className="text-sm text-slate-400">Real data from parking_entries database</p>
           </div>
           <button onClick={() => void fetchDbData()} className="rounded-lg p-2 text-slate-400 hover:bg-slate-700 hover:text-white transition-colors">
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
@@ -566,29 +566,29 @@ export default function ParkingManager() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-700/50">
-                <th className="p-3 text-left font-medium text-slate-400">Ô</th>
-                <th className="p-3 text-left font-medium text-slate-400">Biển số</th>
-                <th className="p-3 text-left font-medium text-slate-400">Loại xe</th>
-                <th className="p-3 text-left font-medium text-slate-400">Giờ vào</th>
-                <th className="p-3 text-left font-medium text-slate-400">Phí</th>
-                <th className="p-3 text-left font-medium text-slate-400">Trạng thái</th>
+                <th className="p-3 text-left font-medium text-slate-400">Slot</th>
+                <th className="p-3 text-left font-medium text-slate-400">License Plate</th>
+                <th className="p-3 text-left font-medium text-slate-400">Vehicle Type</th>
+                <th className="p-3 text-left font-medium text-slate-400">Entry Time</th>
+                <th className="p-3 text-left font-medium text-slate-400">Fee</th>
+                <th className="p-3 text-left font-medium text-slate-400">Status</th>
               </tr>
             </thead>
             <tbody>
               {activeSessions.length === 0 ? (
-                <tr><td colSpan={6} className="p-8 text-center text-slate-500">Chưa có xe đang gửi</td></tr>
+                <tr><td colSpan={6} className="p-8 text-center text-slate-500">No vehicles currently parked</td></tr>
               ) : activeSessions.map((entry) => (
                 <tr key={entry.id} className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors">
                   <td className="p-3 text-slate-300"><span className="inline-flex items-center gap-1"><MapPin className="h-3 w-3 text-slate-500" />{entry.slot_id || "-"}</span></td>
-                  <td className="p-3"><span className="badge bg-blue-500/10 text-blue-400"><Ticket className="h-3 w-3" />{entry.license_plate || "Không rõ"}</span></td>
+                  <td className="p-3"><span className="badge bg-blue-500/10 text-blue-400"><Ticket className="h-3 w-3" />{entry.license_plate || "Unknown"}</span></td>
                   <td className="p-3 text-slate-300">{entry.vehicle_type ? (vehicleLabels[entry.vehicle_type] || entry.vehicle_type) : "-"}</td>
                   <td className="p-3 text-slate-300"><span className="inline-flex items-center gap-1"><Clock className="h-3 w-3 text-slate-500" />{formatTime(entry.entry_time)}</span></td>
                   <td className="p-3 text-cyan-300">{formatCurrency(entry.fee || 0)}</td>
                   <td className="p-3">
                     {entry.fraud_alert ? (
-                      <span className="badge bg-red-500/10 text-red-400">Gian lận</span>
+                      <span className="badge bg-red-500/10 text-red-400">Fraud</span>
                     ) : (
-                      <span className="badge bg-emerald-500/10 text-emerald-400">Bình thường</span>
+                      <span className="badge bg-emerald-500/10 text-emerald-400">Normal</span>
                     )}
                   </td>
                 </tr>

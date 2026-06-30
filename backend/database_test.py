@@ -137,7 +137,7 @@ def test_check_fraud(vehicle_id, license_plate, vehicle_type, color):
     fingerprint_entry = f"{entry['license_plate']}_{entry['vehicle_type']}_{entry['color']}"
     fingerprint_exit = f"{license_plate}_{vehicle_type}_{color}"
     if fingerprint_entry != fingerprint_exit:
-        reason = f"Không khớp: Vào ({entry['license_plate']}/{entry['vehicle_type']}/{entry['color']}) - Ra ({license_plate}/{vehicle_type}/{color})"
+        reason = f"Mismatch: Entry ({entry['license_plate']}/{entry['vehicle_type']}/{entry['color']}) - Exit ({license_plate}/{vehicle_type}/{color})"
         conn.execute('UPDATE test_vehicles SET fraud_alert = 1, fraud_reason = ? WHERE id = ?', (reason, vehicle_id))
         conn.commit()
         conn.close()

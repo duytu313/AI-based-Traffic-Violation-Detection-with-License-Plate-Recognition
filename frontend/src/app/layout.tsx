@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Traffic AI - Hệ thống quản lý giao thông thông minh",
+  title: "Traffic AI - Smart Traffic Management System",
   description:
-    "Hệ thống phát hiện vi phạm giao thông và nhận dạng biển số xe sử dụng AI",
+    "AI-powered traffic violation detection and license plate recognition system",
   icons: {
     icon: "/image/logo.png",
   },
@@ -16,7 +16,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="vi">
+    <html lang="en">
       <body className="min-h-screen antialiased">{children}</body>
     </html>
   );

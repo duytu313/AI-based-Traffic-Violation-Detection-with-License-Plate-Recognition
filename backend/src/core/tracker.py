@@ -1,10 +1,11 @@
 """
-Tracker - Các lớp theo dõi đối tượng (SimpleTracker, ByteTrackVehicleTracker)
+Tracker - Object tracking classes (SimpleTracker, ByteTrackVehicleTracker)
 """
 import time
 import numpy as np
 import threading
 import cv2
+from backend.src.utils.device_utils import get_device
 
 # Streamlit runtime context - optional, only needed for streamlit apps
 try:
@@ -16,13 +17,13 @@ except ImportError:
 
 
 class SimpleTracker:
-    """Tracker đơn giản dựa trên IoU. Phong cách ByteTrack."""
+    """Simple tracker based on IoU. ByteTrack-style."""
     def __init__(self, iou_thresh=0.3, max_lost=15):
         self.next_id = 1
         self.tracks = {}
         self.iou_thresh = iou_thresh
         self.max_lost = max_lost
-        self.violation_history = {}  # ID -> Boolean (Đã từng vi phạm chưa)
+        self.violation_history = {}  # ID -> Boolean (Has violated before)
 
     def iou(self, a, b):
         x1, y1, x2, y2 = a
@@ -71,7 +72,7 @@ class SimpleTracker:
         for i, tid in enumerate(trk_ids):
             if not used_trk[i]:
                 self.tracks[tid]['lost'] += 1
-        # Xóa track lost quá lâu
+        # Remove tracks lost for too long
         lost_ids = [tid for tid, info in self.tracks.items() if info['lost'] > self.max_lost]
         for tid in lost_ids:
             del self.tracks[tid]
@@ -86,8 +87,8 @@ class SimpleTracker:
 
 class ByteTrackVehicleTracker:
     """
-    Wrapper ByteTrack của Ultralytics. Nếu ByteTrack không khả dụng trong môi
-    trường hiện tại, tự rơi về SimpleTracker để app vẫn chạy được.
+    Ultralytics ByteTrack wrapper. If ByteTrack is not available in the current
+    environment, falls back to SimpleTracker so the app can still run.
     """
     def __init__(self, recognizer):
         self.recognizer = recognizer
@@ -102,7 +103,7 @@ class ByteTrackVehicleTracker:
                 frame,
                 persist=True,
                 tracker="bytetrack.yaml",
-                device="cpu",
+                device=get_device(),
                 classes=list(self.recognizer.vehicle_classes.keys()),
                 conf=self.recognizer.vehicle_conf,
                 verbose=False,
@@ -124,7 +125,7 @@ class ByteTrackVehicleTracker:
 
 
 class VideoCaptureThread:
-    """Luồng đọc video/camera riêng để không block Streamlit."""
+    """Separate video/camera reading thread to avoid blocking Streamlit."""
     def __init__(self, src=0, backend=cv2.CAP_ANY):
         self.src = src
         self.backend = backend
@@ -140,7 +141,7 @@ class VideoCaptureThread:
             if not self.cap.isOpened():
                 self.cap = cv2.VideoCapture(self.src)
             if not self.cap.isOpened():
-                raise RuntimeError(f"Không thể mở {self.src}")
+                raise RuntimeError(f"Cannot open {self.src}")
             self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             self.running = True
             thread = threading.Thread(target=self._run, daemon=True)

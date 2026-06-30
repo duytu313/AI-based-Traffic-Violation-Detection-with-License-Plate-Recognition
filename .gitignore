@@ -180,6 +180,10 @@ Desktop.ini
 *.swp
 *~
 
+# Thesis generation
+generate_thesis.py
+Graduation_Thesis_Traffic_AI*.docx
+
 # Large files
 *.zip
 *.tar

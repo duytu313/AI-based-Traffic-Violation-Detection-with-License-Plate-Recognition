@@ -1,6 +1,6 @@
 """
 ROI (Region of Interest) Detector
-Phát hiện xe nằm trong vùng polygon được vẽ thủ công.
+Detects vehicles inside manually drawn polygon zones.
 """
 import cv2
 import numpy as np
@@ -10,19 +10,19 @@ from dataclasses import dataclass
 
 @dataclass
 class ROIConfig:
-    """Cấu hình vùng ROI dạng polygon."""
+    """ROI zone configuration in polygon format."""
     points: List[Dict[str, int]]  # [{"x": 100, "y": 200}, ...]
     name: str = "violation_zone"
 
     def to_numpy(self) -> np.ndarray:
-        """Chuyển điểm thành numpy array cho OpenCV."""
+        """Convert points to numpy array for OpenCV."""
         return np.array([[p["x"], p["y"]] for p in self.points], dtype=np.int32)
 
 
 class ROIDetector:
     """
-    Phát hiện xe có nằm trong vùng ROI không.
-    Sử dụng point-in-polygon test.
+    Detects whether a vehicle is inside the ROI zone.
+    Uses point-in-polygon test.
     """
 
     def __init__(self, roi_config: Optional[ROIConfig] = None):
@@ -30,17 +30,17 @@ class ROIDetector:
         self.violation_history: Dict[int, List[bool]] = {}  # track_id -> list of in_roi flags
 
     def set_roi(self, points: List[Dict[str, int]], name: str = "violation_zone"):
-        """Cập nhật vùng ROI."""
+        """Update ROI zone."""
         self.config = ROIConfig(points=points, name=name)
 
     def clear_roi(self):
-        """Xóa vùng ROI."""
+        """Clear ROI zone."""
         self.config = None
 
     def is_point_in_polygon(self, x: float, y: float) -> bool:
         """
-        Kiểm tra điểm có nằm trong polygon không.
-        Sử dụng thuật toán ray casting.
+        Check if point is inside polygon.
+        Uses ray casting algorithm.
         """
         if self.config is None or len(self.config.points) < 3:
             return False
@@ -48,28 +48,28 @@ class ROIDetector:
         polygon = self.config.to_numpy()
         point = (x, y)
 
-        # Sử dụng OpenCV pointPolygonTest
+        # Use OpenCV pointPolygonTest
         result = cv2.pointPolygonTest(polygon, point, False)
         return result >= 0
 
     def is_bbox_in_roi(self, bbox: tuple, threshold: float = 0.3) -> bool:
         """
-        Kiểm tra xe (bbox) có nằm trong ROI không.
-        Kiểm tra nhiều điểm trên bbox (center, corners, midpoints).
+        Check if vehicle (bbox) is inside ROI.
+        Checks multiple points on bbox (center, corners, midpoints).
         
         Args:
             bbox: (x1, y1, x2, y2)
-            threshold: tỷ lệ tối thiểu số điểm trong ROI để coi là trong vùng
+            threshold: minimum ratio of points inside ROI to consider as inside zone
             
         Returns:
-            True nếu đủ điểm trong ROI
+            True if enough points are inside ROI
         """
         if self.config is None or len(self.config.points) < 3:
             return False
 
         x1, y1, x2, y2 = bbox
         
-        # Kiểm tra nhiều điểm trên bbox
+        # Check multiple points on bbox
         test_points = [
             # Center
             ((x1 + x2) / 2, (y1 + y2) / 2),
@@ -85,16 +85,16 @@ class ROIDetector:
 
     def process_vehicles(self, vehicles: List[Dict], red_light_active: bool = False, min_history: int = 1) -> List[Dict]:
         """
-        Xử lý danh sách xe và phát hiện vi phạm ROI.
+        Process list of vehicles and detect ROI violations.
         
         Args:
-            vehicles: list các dict với keys: bbox, track_id, class_name, conf
-            red_light_active: True nếu đèn đỏ đang bật
-            min_history: số lần liên tiếp xe phải trong ROI để coi là vi phạm
-                         (1 cho ảnh đơn lẻ, 2 cho video để giảm false positive)
+            vehicles: list of dicts with keys: bbox, track_id, class_name, conf
+            red_light_active: True if red light is active
+            min_history: number of consecutive frames vehicle must be in ROI to consider as violation
+                         (1 for single image, 2 for video to reduce false positive)
             
         Returns:
-            list vi phạm phát hiện được
+            list of detected violations
         """
         if self.config is None or len(self.config.points) < 3:
             return []
@@ -110,12 +110,12 @@ class ROIDetector:
 
             in_roi = self.is_bbox_in_roi(bbox)
 
-            # Lưu lịch sử
+            # Save history
             if track_id not in self.violation_history:
                 self.violation_history[track_id] = []
             self.violation_history[track_id].append(in_roi)
 
-            # Phát hiện vi phạm: xe vào ROI khi đèn đỏ
+            # Detect violation: vehicle enters ROI when red light
             if red_light_active and in_roi:
                 history = self.violation_history[track_id]
                 if len(history) >= min_history and sum(history[-min_history:]) >= min_history:
@@ -124,37 +124,37 @@ class ROIDetector:
                         "track_id": track_id,
                         "class_name": vehicle.get("class_name", "vehicle"),
                         "conf": vehicle.get("conf", 0.0),
-                        "details": "Vượt đèn đỏ (ROI)",
+                        "details": "Red light running (ROI)",
                         "violation_type": "RED_LIGHT_VIOLATION",
                     })
 
-        # Dọn dẹp lịch sử cũ
+        # Clean up old history
         self._cleanup_history()
 
         return violations
 
     def _cleanup_history(self, max_history: int = 100):
-        """Dọn dẹp lịch sử cũ."""
+        """Clean up old history."""
         for track_id in list(self.violation_history.keys()):
             if len(self.violation_history[track_id]) > max_history:
                 self.violation_history[track_id] = self.violation_history[track_id][-max_history:]
 
     def draw_roi(self, frame: np.ndarray) -> np.ndarray:
-        """Vẽ vùng ROI lên frame."""
+        """Draw ROI zone on frame."""
         if self.config is None or len(self.config.points) < 3:
             return frame
 
         polygon = self.config.to_numpy()
 
-        # Vẽ polygon fill
+        # Draw polygon fill
         overlay = frame.copy()
         cv2.fillPoly(overlay, [polygon], (0, 255, 255, 50))
         cv2.addWeighted(overlay, 0.3, frame, 0.7, 0, frame)
 
-        # Vẽ đường viền
+        # Draw border
         cv2.polylines(frame, [polygon], True, (0, 255, 255), 3)
 
-        # Vẽ tên vùng
+        # Draw zone name
         if len(self.config.points) > 0:
             first_point = self.config.points[0]
             cv2.putText(
@@ -170,7 +170,7 @@ class ROIDetector:
         return frame
 
     def get_config(self) -> Optional[Dict]:
-        """Lấy cấu hình ROI hiện tại."""
+        """Get current ROI configuration."""
         if self.config is None:
             return None
         return {
@@ -179,5 +179,5 @@ class ROIDetector:
         }
 
     def reset(self):
-        """Reset trạng thái."""
+        """Reset state."""
         self.violation_history.clear()

@@ -25,14 +25,14 @@ export type TabId =
 
 const tabs: { id: TabId; label: string; icon: React.ElementType }[] = [
   { id: "dashboard", label: "Dashboard", icon: BarChart3 },
-  { id: "parking", label: "Bãi đỗ xe", icon: Car },
-  { id: "logistics", label: "Kho vận", icon: Factory },
+  { id: "parking", label: "Parking Lot", icon: Car },
+  { id: "logistics", label: "Logistics", icon: Factory },
   { id: "smartcity", label: "Smart City", icon: Map },
-  { id: "image", label: "Xử lý ảnh", icon: Image },
-  { id: "video", label: "Xử lý video", icon: Video },
+  { id: "image", label: "Image Processing", icon: Image },
+  { id: "video", label: "Video Processing", icon: Video },
   { id: "webcam", label: "Webcam / RTSP", icon: Camera },
   { id: "database", label: "Database", icon: Database },
-  { id: "settings", label: "Cài đặt", icon: Settings2 },
+  { id: "settings", label: "Settings", icon: Settings2 },
 ];
 
 interface TabsProps {

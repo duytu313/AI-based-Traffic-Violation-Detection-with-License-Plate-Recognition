@@ -78,9 +78,9 @@ export default function DatabaseView() {
   };
 
   const tabs: { id: ViewType; label: string; icon: React.ReactNode }[] = [
-    { id: "vehicles", label: "Phương tiện", icon: <Car className="w-4 h-4" /> },
-    { id: "violations", label: "Vi phạm", icon: <AlertTriangle className="w-4 h-4" /> },
-    { id: "fraud", label: "Gian lận", icon: <AlertTriangle className="w-4 h-4" /> },
+    { id: "vehicles", label: "Vehicles", icon: <Car className="w-4 h-4" /> },
+    { id: "violations", label: "Violations", icon: <AlertTriangle className="w-4 h-4" /> },
+    { id: "fraud", label: "Fraud", icon: <AlertTriangle className="w-4 h-4" /> },
   ];
 
   return (
@@ -93,8 +93,8 @@ export default function DatabaseView() {
               <Database className="w-5 h-5 text-emerald-400" />
             </div>
             <div>
-              <h2 className="font-bold text-white">Cơ sở dữ liệu</h2>
-              <p className="text-sm text-slate-400">Lịch sử phương tiện và vi phạm</p>
+              <h2 className="font-bold text-white">Database</h2>
+              <p className="text-sm text-slate-400">Vehicle and violation history</p>
             </div>
           </div>
           <button
@@ -133,7 +133,7 @@ export default function DatabaseView() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
           <input
             type="text"
-            placeholder="Tìm kiếm biển số..."
+            placeholder="Search license plate..."
             value={searchPlate}
             onChange={(e) => {
               setSearchPlate(e.target.value);
@@ -153,30 +153,30 @@ export default function DatabaseView() {
                 {view === "vehicles" && (
                   <>
                     <th className="text-left p-3 text-slate-400 font-medium">ID</th>
-                    <th className="text-left p-3 text-slate-400 font-medium">Biển số</th>
-                    <th className="text-left p-3 text-slate-400 font-medium">Loại</th>
-                    <th className="text-left p-3 text-slate-400 font-medium">Màu</th>
-                    <th className="text-left p-3 text-slate-400 font-medium">Vào</th>
-                    <th className="text-left p-3 text-slate-400 font-medium">Ra</th>
-                    <th className="text-left p-3 text-slate-400 font-medium">Gian lận</th>
+                    <th className="text-left p-3 text-slate-400 font-medium">License Plate</th>
+                    <th className="text-left p-3 text-slate-400 font-medium">Type</th>
+                    <th className="text-left p-3 text-slate-400 font-medium">Color</th>
+                    <th className="text-left p-3 text-slate-400 font-medium">Entry</th>
+                    <th className="text-left p-3 text-slate-400 font-medium">Exit</th>
+                    <th className="text-left p-3 text-slate-400 font-medium">Fraud</th>
                   </>
                 )}
                 {view === "violations" && (
                   <>
                     <th className="text-left p-3 text-slate-400 font-medium">ID</th>
-                    <th className="text-left p-3 text-slate-400 font-medium">Loại</th>
-                    <th className="text-left p-3 text-slate-400 font-medium">Chi tiết</th>
-                    <th className="text-left p-3 text-slate-400 font-medium">Biển số</th>
-                    <th className="text-left p-3 text-slate-400 font-medium">Thời gian</th>
+                    <th className="text-left p-3 text-slate-400 font-medium">Type</th>
+                    <th className="text-left p-3 text-slate-400 font-medium">Details</th>
+                    <th className="text-left p-3 text-slate-400 font-medium">License Plate</th>
+                    <th className="text-left p-3 text-slate-400 font-medium">Time</th>
                   </>
                 )}
                 {view === "fraud" && (
                   <>
                     <th className="text-left p-3 text-slate-400 font-medium">ID</th>
-                    <th className="text-left p-3 text-slate-400 font-medium">Biển số</th>
-                    <th className="text-left p-3 text-slate-400 font-medium">Loại xe</th>
-                    <th className="text-left p-3 text-slate-400 font-medium">Lý do</th>
-                    <th className="text-left p-3 text-slate-400 font-medium">Thời gian</th>
+                    <th className="text-left p-3 text-slate-400 font-medium">License Plate</th>
+                    <th className="text-left p-3 text-slate-400 font-medium">Vehicle Type</th>
+                    <th className="text-left p-3 text-slate-400 font-medium">Reason</th>
+                    <th className="text-left p-3 text-slate-400 font-medium">Time</th>
                   </>
                 )}
               </tr>
@@ -186,25 +186,25 @@ export default function DatabaseView() {
                 <tr>
                   <td colSpan={7} className="p-8 text-center text-slate-500">
                     <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2" />
-                    Đang tải...
+                    Loading...
                   </td>
                 </tr>
               ) : view === "vehicles" && vehicles.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="p-8 text-center text-slate-500">
-                    Chưa có dữ liệu
+                    No data available
                   </td>
                 </tr>
               ) : view === "violations" && violations.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="p-8 text-center text-slate-500">
-                    Chưa có dữ liệu
+                    No data available
                   </td>
                 </tr>
               ) : view === "fraud" && fraudAlerts.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="p-8 text-center text-slate-500">
-                    Chưa có dữ liệu
+                    No data available
                   </td>
                 </tr>
               ) : (
@@ -238,7 +238,7 @@ export default function DatabaseView() {
                         </td>
                         <td className="p-3">
                           {v.fraud_alert ? (
-                            <span className="badge bg-red-500/10 text-red-400">Cảnh báo</span>
+                            <span className="badge bg-red-500/10 text-red-400">Alert</span>
                           ) : (
                             <span className="text-slate-500">-</span>
                           )}
@@ -311,7 +311,7 @@ export default function DatabaseView() {
             <ChevronLeft className="w-4 h-4 text-slate-300" />
           </button>
           <span className="text-sm text-slate-400">
-            Trang {page + 1}
+            Page {page + 1}
           </span>
           <button
             onClick={() => setPage(page + 1)}
