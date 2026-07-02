@@ -49,6 +49,9 @@ from database_test import (
     test_get_stats,
     test_update_exit,
     test_check_fraud,
+    insert_speed_violation,
+    get_speed_violations,
+    get_speed_violation_stats,
 )
 
 
@@ -103,3 +106,13 @@ def get_connection():
 
 def check_fraud_on_exit(vehicle_id, license_plate, vehicle_type, color):
     return test_check_fraud(vehicle_id, license_plate, vehicle_type, color)
+
+# Speed violation functions
+def db_insert_speed_violation(vehicle_id, track_id, license_plate, vehicle_type, color, speed_kmh, speed_limit, image_path=None):
+    return insert_speed_violation(vehicle_id, track_id, license_plate, vehicle_type, color, speed_kmh, speed_limit, image_path)
+
+def db_get_speed_violations(limit=100, offset=0, license_plate=None):
+    return get_speed_violations(limit, offset, license_plate)
+
+def db_get_speed_violation_stats():
+    return get_speed_violation_stats()

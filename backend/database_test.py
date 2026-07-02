@@ -46,6 +46,20 @@ def init_db():
             image_path TEXT
         )
     ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS speed_violations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            vehicle_id INTEGER,
+            track_id INTEGER,
+            license_plate TEXT,
+            vehicle_type TEXT,
+            color TEXT,
+            speed_kmh REAL,
+            speed_limit REAL,
+            timestamp TIMESTAMP,
+            image_path TEXT
+        )
+    ''')
     conn.commit()
     conn.close()
 
@@ -144,3 +158,45 @@ def test_check_fraud(vehicle_id, license_plate, vehicle_type, color):
         return True, reason
     conn.close()
     return False, None
+
+def insert_speed_violation(vehicle_id, track_id, license_plate, vehicle_type, color, speed_kmh, speed_limit, image_path=None):
+    conn = get_test_connection()
+    cur = conn.cursor()
+    cur.execute('''
+        INSERT INTO speed_violations (vehicle_id, track_id, license_plate, vehicle_type, color, speed_kmh, speed_limit, timestamp, image_path)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (vehicle_id, track_id, license_plate, vehicle_type, color, speed_kmh, speed_limit, datetime.now(), image_path))
+    violation_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return violation_id
+
+def get_speed_violations(limit=100, offset=0, license_plate=None):
+    conn = get_test_connection()
+    query = """
+        SELECT sv.*, ve.entry_time
+        FROM speed_violations sv
+        LEFT JOIN test_vehicles ve ON sv.vehicle_id = ve.id
+        WHERE 1=1
+    """
+    params = []
+    if license_plate:
+        query += " AND sv.license_plate LIKE ?"
+        params.append(f"%{license_plate}%")
+    query += " ORDER BY sv.timestamp DESC LIMIT ? OFFSET ?"
+    params.extend([limit, offset])
+    rows = conn.execute(query, params).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def get_speed_violation_stats():
+    conn = get_test_connection()
+    total = conn.execute('SELECT COUNT(*) FROM speed_violations').fetchone()[0]
+    avg_speed = conn.execute('SELECT AVG(speed_kmh) FROM speed_violations').fetchone()[0]
+    max_speed = conn.execute('SELECT MAX(speed_kmh) FROM speed_violations').fetchone()[0]
+    conn.close()
+    return {
+        "total_speed_violations": total,
+        "avg_speed": round(avg_speed, 1) if avg_speed else 0,
+        "max_speed": round(max_speed, 1) if max_speed else 0
+    }

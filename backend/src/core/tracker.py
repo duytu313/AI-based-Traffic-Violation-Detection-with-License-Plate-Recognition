@@ -94,6 +94,8 @@ class ByteTrackVehicleTracker:
         self.recognizer = recognizer
         self.fallback = SimpleTracker(max_lost=30)
         self.use_fallback = False
+        self.track_history = {}  # track_id -> list of (timestamp, bbox_center)
+        self.speed_limit = 60  # km/h, default speed limit
 
     def update(self, frame, fallback_dets):
         if self.use_fallback:
@@ -113,15 +115,81 @@ class ByteTrackVehicleTracker:
 
             tracked = []
             boxes = results[0].boxes
+            current_time = time.time()
+            
             for box, track_id in zip(boxes, boxes.id):
                 x1, y1, x2, y2 = map(int, box.xyxy[0])
                 cls_id = int(box.cls[0])
                 conf = float(box.conf[0])
-                tracked.append((int(track_id), (x1, y1, x2, y2), cls_id, conf))
+                tid = int(track_id)
+                
+                # Calculate center point
+                center_x = (x1 + x2) / 2.0
+                center_y = (y1 + y2) / 2.0
+                
+                # Update track history for speed calculation
+                if tid not in self.track_history:
+                    self.track_history[tid] = []
+                
+                self.track_history[tid].append((current_time, center_x, center_y))
+                
+                # Keep only last 30 frames (about 1.5 seconds at 20 FPS)
+                if len(self.track_history[tid]) > 30:
+                    self.track_history[tid].pop(0)
+                
+                tracked.append((tid, (x1, y1, x2, y2), cls_id, conf))
             return tracked
         except Exception:
             self.use_fallback = True
             return self.fallback.update(fallback_dets)
+    
+    def calculate_speed(self, track_id, pixels_per_meter=10):
+        """
+        Calculate speed for a tracked vehicle in km/h.
+        
+        Args:
+            track_id: The track ID of the vehicle
+            pixels_per_meter: Calibration factor (pixels per meter in the scene)
+        
+        Returns:
+            Speed in km/h, or None if cannot calculate
+        """
+        if track_id not in self.track_history or len(self.track_history[track_id]) < 2:
+            return None
+        
+        history = self.track_history[track_id]
+        
+        # Use last 10 frames for more stable speed calculation
+        if len(history) < 10:
+            return None
+        
+        # Get first and last positions
+        t1, x1, y1 = history[0]
+        t2, x2, y2 = history[-1]
+        
+        time_diff = t2 - t1
+        if time_diff <= 0:
+            return None
+        
+        # Calculate pixel distance
+        pixel_distance = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
+        
+        # Convert to meters
+        meters = pixel_distance / pixels_per_meter
+        
+        # Calculate speed in m/s, then convert to km/h
+        speed_ms = meters / time_diff
+        speed_kmh = speed_ms * 3.6
+        
+        return round(speed_kmh, 1)
+    
+    def set_speed_limit(self, speed_limit):
+        """Set speed limit for violation detection."""
+        self.speed_limit = speed_limit
+    
+    def get_speed(self, track_id):
+        """Get current speed of a tracked vehicle."""
+        return self.calculate_speed(track_id)
 
 
 class VideoCaptureThread:

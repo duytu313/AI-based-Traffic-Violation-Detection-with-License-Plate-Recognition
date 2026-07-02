@@ -93,6 +93,50 @@ export async function getFraudAlerts(limit?: number): Promise<any[]> {
   return res.data;
 }
 
+// ======================== SPEED VIOLATION API ========================
+
+export interface SpeedViolation {
+  id: number;
+  vehicle_id: number | null;
+  track_id: number;
+  license_plate: string;
+  vehicle_type: string;
+  color: string;
+  speed_kmh: number;
+  speed_limit: number;
+  timestamp: string;
+  image_path: string | null;
+  entry_time: string | null;
+}
+
+export interface SpeedViolationStats {
+  total_speed_violations: number;
+  avg_speed: number;
+  max_speed: number;
+}
+
+export async function getSpeedViolations(limit = 50, licensePlate?: string): Promise<SpeedViolation[]> {
+  const res = await api.get("/api/speed-violations", { params: { limit, license_plate: licensePlate } });
+  return res.data;
+}
+
+export async function getSpeedViolationStats(): Promise<SpeedViolationStats> {
+  const res = await api.get("/api/speed-violation-stats");
+  return res.data;
+}
+
+export async function setSpeedLimit(speedLimit: number): Promise<{ status: string; speed_limit: number }> {
+  const formData = new FormData();
+  formData.append("speed_limit", String(speedLimit));
+  const res = await api.post("/api/speed-limit", formData);
+  return res.data;
+}
+
+export async function getSpeedLimit(): Promise<{ speed_limit: number }> {
+  const res = await api.get("/api/speed-limit");
+  return res.data;
+}
+
 export async function processVideo(file: File, config: any): Promise<any> {
   const formData = new FormData();
   formData.append("file", file);
@@ -104,6 +148,7 @@ export async function processVideo(file: File, config: any): Promise<any> {
   formData.append("conf_using_mobile", String(config.conf_using_mobile));
   formData.append("traffic_light_conf", String(config.traffic_light_conf));
   formData.append("max_frames", "100");
+  formData.append("speed_limit", String(config.speed_limit || 60));
   const res = await api.post("/api/process-video", formData);
   return res.data;
 }
@@ -432,6 +477,101 @@ export async function getBEVConfig(): Promise<any> {
 
 export async function resetBEV(): Promise<any> {
   const res = await api.post("/api/bev/reset");
+  return res.data;
+}
+
+// ======================== REPORTS API ========================
+
+export interface OCRModelStats {
+  model_name: string;
+  dataset: {
+    name: string;
+    source: string;
+    total_images: number;
+    sample_data: Array<{
+      name: string;
+      label: string;
+      type: number;
+    }>;
+  };
+  evaluation_metrics: {
+    plate_accuracy: number;
+    character_accuracy: number;
+    character_error_rate: number;
+    average_latency_ms: number;
+    fps: number;
+  };
+  evaluation_date: string;
+  notes: string[];
+}
+
+export interface SpeedViolationReport {
+  period_days: number;
+  total_violations: number;
+  speed_stats: {
+    average: number;
+    maximum: number;
+    minimum: number;
+  };
+  by_vehicle_type: Array<{
+    type: string;
+    count: number;
+    avg_speed: number;
+  }>;
+  by_hour: Array<{
+    hour: number;
+    count: number;
+  }>;
+  recent_violations: Array<{
+    id: number;
+    license_plate: string;
+    vehicle_type: string;
+    color: string;
+    speed_kmh: number;
+    speed_limit: number;
+    timestamp: string;
+    over_limit: number;
+  }>;
+}
+
+export interface ComprehensiveReport {
+  report_generated_at: string;
+  system_overview: {
+    total_vehicles_detected: number;
+    total_violations: number;
+    total_speed_violations: number;
+    fraud_alerts: number;
+  };
+  violation_breakdown: Array<{
+    type: string;
+    count: number;
+  }>;
+  vehicle_distribution: Array<{
+    type: string;
+    color: string;
+    count: number;
+  }>;
+  ocr_model_performance: OCRModelStats;
+  speed_violation_analysis: SpeedViolationReport;
+}
+
+export async function getOCRReport(): Promise<OCRModelStats> {
+  const res = await api.get("/api/reports/ocr");
+  return res.data;
+}
+
+export async function getSpeedViolationsReport(days: number = 30): Promise<SpeedViolationReport> {
+  const res = await api.get("/api/reports/speed-violations", { params: { days } });
+  return res.data;
+}
+
+export async function getComprehensiveReport(): Promise<ComprehensiveReport> {
+  const res = await api.get("/api/reports/comprehensive");
+  return res.data;
+}
+
+export async function exportSystemReport(): Promise<{ status: string; filepath: string }> {
+  const res = await api.post("/api/reports/export");
   return res.data;
 }
 

@@ -64,21 +64,44 @@ export interface DBViolation {
   color: string | null;
 }
 
+export interface SpeedViolation {
+  id: number;
+  vehicle_id: number | null;
+  track_id: number;
+  license_plate: string;
+  vehicle_type: string;
+  color: string;
+  speed_kmh: number;
+  speed_limit: number;
+  timestamp: string;
+  image_path: string | null;
+  entry_time: string | null;
+}
+
+export interface SpeedViolationStats {
+  total_speed_violations: number;
+  avg_speed: number;
+  max_speed: number;
+}
+
 export interface Stats {
   total_vehicles: number;
   fraud_alerts: number;
   total_violations: number;
+  total_speed_violations?: number;
 }
 
 export interface Config {
   enable_violation_detection: boolean;
   enable_red_light_detection: boolean;
   enable_bev_detection: boolean;
+  enable_speed_violation_detection: boolean;
   violation_conf_limit: number;
   conf_more_than_two: number;
   conf_no_helmet: number;
   conf_using_mobile: number;
   traffic_light_conf: number;
+  speed_limit: number;
   show_zones: boolean;
   show_bev: boolean;
   camera_direction: "down" | "up";

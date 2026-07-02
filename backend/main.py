@@ -36,6 +36,8 @@ from database import (
     insert_traffic_flow, insert_city_violation, insert_red_light_violation,
     # Test
     test_get_vehicles, test_get_violations, test_get_stats,
+    # Speed violations
+    db_insert_speed_violation, db_get_speed_violations, db_get_speed_violation_stats,
 )
 from backend.src.core.tracker import ByteTrackVehicleTracker, VideoCaptureThread
 from backend.src.utils.image_utils import (
@@ -44,6 +46,7 @@ from backend.src.utils.image_utils import (
 )
 from backend.src.utils.notifications import send_telegram_notification, send_violation_telegram
 from backend.src.utils.device_utils import get_device
+# Report generator removed - functions will be added back if needed
 
 # Import models directly (without Streamlit decorator)
 from ultralytics import YOLO
@@ -325,9 +328,10 @@ async def set_bev_config(request: Request):
     if "red_light_buffer_frames" in data:
         bev_detector.set_red_light_buffer_frames(int(data["red_light_buffer_frames"]))
     
-    # Invalidate cached frames so BEV zone redraws immediately
-    with camera_stream.lock:
-        camera_stream._last_frame = None
+    # Invalidate cached frames so BEV zone redraws immediately on all streams
+    for stream in [camera_stream] + list(parking_streams.values()) + list(logistics_streams.values()) + list(smartcity_streams.values()):
+        with stream.lock:
+            stream._last_frame = None
     
     return {"status": "ok", "config": bev_detector.get_stats()}
 
@@ -523,6 +527,11 @@ async def process_image(
         if plate_text:
             cv2.putText(img_draw, plate_text, (x1, y2+20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
+    # Draw license plate bounding boxes
+    for plate_img, (px1, py1, px2, py2) in plates:
+        cv2.rectangle(img_draw, (px1, py1), (px2, py2), (255, 255, 0), 2)
+        cv2.putText(img_draw, "PLATE", (px1, py1-3), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 0), 1)
+
     for item in all_violation_data:
         for viol in item['violations']:
             vx1, vy1, vx2, vy2 = viol['bbox']
@@ -578,6 +587,7 @@ async def process_video(
     conf_using_mobile: float = Form(0.15),
     traffic_light_conf: float = Form(0.25),
     max_frames: int = Form(100),
+    speed_limit: int = Form(60),
 ):
     """Process video file frame by frame and return summary."""
     # Save uploaded video to temp file
@@ -604,8 +614,10 @@ async def process_video(
         recognizer.set_traffic_light_conf(traffic_light_conf)
 
         tracker = ByteTrackVehicleTracker(recognizer)
+        tracker.set_speed_limit(speed_limit)
         all_detected = []
         all_violations = []
+        all_speed_violations = []
         frame_count = 0
         processed_frames = 0
 
@@ -635,6 +647,44 @@ async def process_video(
                         continue
                     matched_bbox, vtype, color, plate_img, plate_text = found
                     vehicle_viols = vehicle_violation_map.get(tuple(matched_bbox), [])
+
+                    # Speed violation detection
+                    speed = tracker.calculate_speed(trk_id)
+                    if speed is not None and speed > speed_limit:
+                        speed_violation = {
+                            "frame": processed_frames,
+                            "track_id": trk_id,
+                            "speed_kmh": speed,
+                            "speed_limit": speed_limit,
+                            "plate_text": plate_text,
+                            "vtype": vtype,
+                            "color": color,
+                            "bbox": list(bbox),
+                        }
+                        all_speed_violations.append(speed_violation)
+                        
+                        # Save to database
+                        vehicle_id = None
+                        speed_img_path = None
+                        if plate_text:
+                            vehicle_crop, _ = crop_vehicle_context(frame, (x1, y1, x2, y2), vtype)
+                            speed_img_path = f"data/vehicles/speed_video_{trk_id}_{int(time.time())}.jpg"
+                            os.makedirs("data/vehicles", exist_ok=True)
+                            cv2.imwrite(speed_img_path, vehicle_crop)
+                            
+                            # Try to find or create vehicle entry
+                            from database_test import get_test_connection
+                            conn = get_test_connection()
+                            existing = conn.execute(
+                                'SELECT id FROM test_vehicles WHERE track_id = ?', (trk_id,)
+                            ).fetchone()
+                            if existing:
+                                vehicle_id = existing['id']
+                            else:
+                                vehicle_id = insert_vehicle_entry(trk_id, plate_text, vtype, color, None, None)
+                            conn.close()
+                            
+                            db_insert_speed_violation(vehicle_id, trk_id, plate_text, vtype, color, speed, speed_limit, speed_img_path)
 
                     if plate_text or vehicle_viols:
                         all_detected.append({
@@ -689,9 +739,11 @@ async def process_video(
             "fps": fps,
             "detected": all_detected,
             "violations": all_violations,
+            "speed_violations": all_speed_violations,
             "stats": {
                 "total_vehicles": len(set(d['track_id'] for d in all_detected)),
                 "total_violations": len(all_violations),
+                "total_speed_violations": len(all_speed_violations),
             },
             "result_image": result_image
         }
@@ -980,6 +1032,41 @@ class CameraStream:
         current_displayed_plate_texts = {item[2] for item in self.detected_items}
         current_displayed_violations = {f"{item[1]}_{item[2]}" for item in self.violation_items}
 
+        # Speed violation detection
+        speed_violation_sent = set()
+        for trk_id, bbox, cls_id, conf in tracked:
+            speed = self.tracker.calculate_speed(trk_id)
+            if speed is not None and speed > self.tracker.speed_limit:
+                speed_violation_key = f"{trk_id}_SPEED"
+                if speed_violation_key not in speed_violation_sent:
+                    speed_violation_sent.add(speed_violation_key)
+                    x1, y1, x2, y2 = bbox
+                    found = find_vehicle_context_by_bbox(vehicles, matched, bbox)
+                    if found is not None:
+                        matched_bbox, vtype, color, plate_img, plate_text = found
+                        vehicle_id = self.active_tracks.get(trk_id)
+                        if vehicle_id is None:
+                            vehicle_crop, _ = crop_vehicle_context(frame, (x1, y1, x2, y2), vtype)
+                            vehicle_img_path = f"data/vehicles/track_{trk_id}_{int(time.time())}.jpg"
+                            plate_img_path = None
+                            os.makedirs("data/vehicles", exist_ok=True)
+                            os.makedirs("data/plates", exist_ok=True)
+                            cv2.imwrite(vehicle_img_path, vehicle_crop)
+                            if plate_img is not None:
+                                plate_img_path = f"data/plates/track_{trk_id}_{int(time.time())}.jpg"
+                                cv2.imwrite(plate_img_path, plate_img)
+                            vehicle_id = insert_vehicle_entry(trk_id, plate_text, vtype, color, vehicle_img_path, plate_img_path)
+                            self.active_tracks[trk_id] = vehicle_id
+                        
+                        speed_img_path = f"data/vehicles/speed_{trk_id}_{int(time.time())}.jpg"
+                        vehicle_crop, _ = crop_vehicle_context(frame, (x1, y1, x2, y2), vtype)
+                        cv2.imwrite(speed_img_path, vehicle_crop)
+                        db_insert_speed_violation(vehicle_id, trk_id, plate_text, vtype, color, speed, self.tracker.speed_limit, speed_img_path)
+                        speed_details = f"Speed {speed} km/h (limit {self.tracker.speed_limit} km/h)"
+                        self.violation_items.append((vehicle_crop, plate_text, "SPEED_VIOLATION", speed_details, f"{speed} km/h"))
+                        current_time = datetime.now().strftime("%H:%M:%S")
+                        print(f"[{current_time}] ⚠️ SPEED: Vehicle {plate_text or trk_id} - {speed} km/h (limit {self.tracker.speed_limit} km/h)")
+
         for trk_id, bbox, cls_id, conf in tracked:
             self.last_seen[trk_id] = time.time()
             x1, y1, x2, y2 = bbox
@@ -1079,12 +1166,30 @@ class CameraStream:
             cv2.putText(frame, label, (x1, max(15, y1 - 5)),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
-        # Draw tracked vehicles
+        # Draw tracked vehicles with speed
         for trk_id, bbox, cls_id, conf in tracked:
             x1, y1, x2, y2 = bbox
             color_box = (0, 255, 0) if trk_id in self.active_tracks else (255, 0, 0)
             cv2.rectangle(frame, (x1, y1), (x2, y2), color_box, 1)
-            cv2.putText(frame, f"ID:{trk_id}", (x1, y1-3), cv2.FONT_HERSHEY_SIMPLEX, 0.35, color_box, 1)
+            # Speed display
+            speed = self.tracker.calculate_speed(trk_id)
+            speed_text = f"ID:{trk_id}"
+            if speed is not None:
+                speed_text += f" {speed:.0f}km/h"
+            cv2.putText(frame, speed_text, (x1, y1-3), cv2.FONT_HERSHEY_SIMPLEX, 0.35, color_box, 1)
+        
+        # Draw license plate bounding boxes
+        for plate_img, (px1, py1, px2, py2) in plates:
+            cv2.rectangle(frame, (px1, py1), (px2, py2), (255, 255, 0), 2)
+            cv2.putText(frame, "PLATE", (px1, py1-3), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 0), 1)
+        
+        # Draw matched plate text near vehicles
+        for m in matched:
+            if len(m) >= 5:
+                mb, mt, mc, mp_img, mp_txt = m
+                mx1, my1, mx2, my2 = mb
+                if mp_txt:
+                    cv2.putText(frame, mp_txt, (mx1, my2+15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
 
         # Bird's Eye View (BEV) - draw all overlays like Colab
         # Draw: yellow trapezoid, camera stop line, VIOLATION/WAITING labels, light status
@@ -1317,7 +1422,7 @@ class VideoStreamProcessor:
             cv2.putText(img_draw, label, (x1, max(15, y1 - 5)),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
-        # Draw tracked vehicles
+        # Draw tracked vehicles with speed
         for trk_id, bbox, cls_id, conf in tracked:
             x1, y1, x2, y2 = bbox
             found = find_vehicle_context_by_bbox(vehicles, matched, bbox)
@@ -1328,10 +1433,27 @@ class VideoStreamProcessor:
             has_violation = len(vehicle_viols) > 0
             box_color = (0, 0, 255) if has_violation else (0, 255, 0)
             cv2.rectangle(img_draw, (x1, y1), (x2, y2), box_color, 2)
+            # Speed display
+            speed = self.tracker.calculate_speed(trk_id)
             label = f"ID:{trk_id} {color} {vtype}"
+            if speed is not None:
+                label += f" {speed:.0f}km/h"
             if plate_text:
                 label += f" | {plate_text}"
             cv2.putText(img_draw, label, (x1, y1-5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, box_color, 2)
+        
+        # Draw license plate bounding boxes
+        for plate_img, (px1, py1, px2, py2) in plates:
+            cv2.rectangle(img_draw, (px1, py1), (px2, py2), (255, 255, 0), 2)
+            cv2.putText(img_draw, "PLATE", (px1, py1-3), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 0), 1)
+        
+        # Draw matched plate text near vehicles
+        for m in matched:
+            if len(m) >= 5:
+                mb, mt, mc, mp_img, mp_txt = m
+                mx1, my1, mx2, my2 = mb
+                if mp_txt:
+                    cv2.putText(img_draw, mp_txt, (mx1, my2+15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
 
         # Draw violations
         if self.config.get('enable_violation_detection', True):
@@ -1939,6 +2061,49 @@ def get_fraud_alerts(limit: int = Query(50, le=200)):
     """, (limit,)).fetchall()
     conn.close()
     return JSONResponse(content=[dict(row) for row in rows])
+
+
+# ======================== SPEED VIOLATION API ========================
+
+@app.get("/api/speed-violations")
+def get_speed_violations_api(limit: int = Query(50, le=200), license_plate: Optional[str] = None):
+    """Get speed violations from database."""
+    return db_get_speed_violations(limit, 0, license_plate)
+
+@app.get("/api/speed-violation-stats")
+def get_speed_violation_stats_api():
+    """Get speed violation statistics."""
+    return db_get_speed_violation_stats()
+
+@app.post("/api/speed-limit")
+def set_speed_limit(speed_limit: int = Form(60)):
+    """Set speed limit for violation detection on all streams."""
+    # Apply to webcam stream
+    if camera_stream.tracker:
+        camera_stream.tracker.set_speed_limit(speed_limit)
+    # Apply to parking streams
+    for stream in parking_streams.values():
+        if stream.tracker:
+            stream.tracker.set_speed_limit(speed_limit)
+    # Apply to logistics streams
+    for stream in logistics_streams.values():
+        if stream.tracker:
+            stream.tracker.set_speed_limit(speed_limit)
+    # Apply to smartcity streams
+    for stream in smartcity_streams.values():
+        if stream.tracker:
+            stream.tracker.set_speed_limit(speed_limit)
+    return {"status": "ok", "speed_limit": speed_limit}
+
+@app.get("/api/speed-limit")
+def get_speed_limit():
+    """Get current speed limit."""
+    limit = camera_stream.tracker.speed_limit if camera_stream.tracker else 60
+    return {"speed_limit": limit}
+
+
+# ======================== REPORTS API ========================
+# Report generation removed - use database APIs for data queries
 
 
 if __name__ == "__main__":

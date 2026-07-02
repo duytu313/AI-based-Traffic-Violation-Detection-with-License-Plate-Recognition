@@ -3,10 +3,10 @@
 **Traffic AI** is an AI-powered traffic violation detection and license plate recognition system (YOLOv8 + FastPlateOCR), combining **FastAPI backend** and **Next.js 16 frontend**.
 
 The system supports **4 business modules**:
-- 🚦 **Traffic Monitoring** – Traffic surveillance, violation detection
-- 🅿️ **Parking Management** – Vehicle entry/exit management
+- 🚦 **Traffic Monitoring** – Traffic surveillance, violation detection, speed enforcement
+- 🅿️ **Parking Management** – Vehicle entry/exit management with fraud detection
 - 🚛 **Logistics** – Warehouse monitoring, unknown vehicle detection
-- 🏙️ **SmartCity** – Multi-camera urban traffic monitoring
+- 🏙️ **SmartCity** – Multi-camera urban traffic monitoring & flow analysis
 
 ---
 
@@ -14,26 +14,34 @@ The system supports **4 business modules**:
 
 ```
 ├── backend/                        # FastAPI Backend (Python)
-│   ├── main.py                     # Main API server (1927 lines)
+│   ├── main.py                     # Main API server (2083 lines)
 │   ├── requirements.txt            # Python dependencies
-│   ├── database.py                 # SQLite database (traffic)
+│   ├── database.py                 # SQLite database (traffic + parking + logistics + smartcity)
 │   ├── database_parking.py         # Parking database
 │   ├── database_logistics.py       # Logistics database
 │   ├── database_smartcity.py       # SmartCity database
-│   ├── database_test.py            # Test database
+│   ├── database_test.py            # Test database (image/video/webcam processing)
 │   ├── data/
 │   │   └── traffic.db              # SQLite file
 │   ├── files_model/                # YOLO model weights
+│   │   ├── helmet.pt               # Violation detection (helmet, overload, phone)
+│   │   ├── license_plate_detector.pt  # License plate detection
+│   │   ├── traffic_light.pt        # Traffic light detection
+│   │   ├── vehicle_color_n_cls.pt  # Vehicle color classification
+│   │   ├── yolov8n.pt              # Base YOLOv8 nano (vehicle detection)
+│   │   └── yolov8n-cls.pt         # YOLOv8 classification
 │   └── src/
 │       ├── core/
 │       │   ├── engine.py           # License plate recognizer, violations
-│       │   ├── tracker.py          # Object tracking (ByteTrack)
+│       │   ├── tracker.py          # Object tracking (ByteTrack) + speed estimation
 │       │   ├── zones.py            # Zone-based red light config
 │       │   ├── roi_detector.py     # ROI polygon violation detection
 │       │   └── birds_eye_detector.py  # Bird's Eye View 3D red light
 │       ├── utils/
 │       │   ├── image_utils.py      # Image processing utilities
-│       │   └── notifications.py    # Telegram notifications
+│       │   ├── notifications.py    # Telegram notifications
+│       │   ├── device_utils.py     # GPU/CPU device detection
+│       │   └── report_generator.py # OCR, speed, comprehensive reports
 │       └── ui/
 │           └── components.py       # Streamlit components (legacy)
 │
@@ -42,7 +50,7 @@ The system supports **4 business modules**:
 │   │   ├── app/
 │   │   │   ├── layout.tsx          # Root layout
 │   │   │   ├── page.tsx            # Main page with 9 tabs
-│   │   │   └── globals.css         # Dark theme styles
+│   │   │   └── globals.css         # Dark theme styles (Tailwind CSS v4)
 │   │   ├── components/
 │   │   │   ├── Header.tsx          # Header with API status
 │   │   │   ├── Tabs.tsx            # Tab navigation
@@ -64,7 +72,7 @@ The system supports **4 business modules**:
 │   ├── .env.local                  # Environment config
 │   └── package.json
 │
-├── files_model/                    # YOLO model weights
+├── files_model/                    # YOLO model weights (shared)
 │   ├── helmet.pt                   # Violation detection (helmet, overload, phone)
 │   ├── license_plate_detector.pt   # License plate detection
 │   ├── traffic_light.pt            # Traffic light detection
@@ -93,10 +101,12 @@ The system supports **4 business modules**:
 | ✅ **Violation Detection** | No helmet, carrying more than 2 people, using phone |
 | ✅ **Red Light Violation Detection** | 3 methods: Zone-based, ROI Polygon, Bird's Eye View 3D |
 | ✅ **Object Tracking** | ByteTrack for real-time video |
+| ✅ **Speed Violation Detection** | Real-time speed estimation with configurable speed limit |
 | ✅ **Telegram Notifications** | Instant violation alerts with images |
 | ✅ **Static Image Processing** | Upload image, analyze, display results |
 | ✅ **Video Processing** | Upload video, streaming with bounding boxes |
 | ✅ **Webcam/RTSP** | Real-time streaming from IP camera or webcam |
+| ✅ **GPU Acceleration** | Automatic GPU detection and model offloading |
 
 ### 🅿️ Parking Management
 
@@ -121,7 +131,7 @@ The system supports **4 business modules**:
 
 | Feature | Description |
 |---------|-------------|
-| ✅ **Multi-Camera** | Support up to 4 monitoring cameras |
+| ✅ **Multi-Camera** | Support up to 4 monitoring cameras (cam1-cam4) |
 | ✅ **Traffic Flow Analysis** | Hourly vehicle flow measurement |
 | ✅ **Violation Detection** | Aggregate violations from multiple cameras |
 | ✅ **Urban Statistics** | City traffic overview dashboard |
@@ -198,6 +208,7 @@ NEXT_PUBLIC_API_URL=http://localhost:8000
 | GET | `/api/violations` | Violation list |
 | GET | `/api/stats` | Overall statistics |
 | GET | `/api/fraud` | Fraud alerts |
+| GET | `/api/global-stats` | Combined stats from all databases |
 
 ### Red Light Detection
 
@@ -235,6 +246,24 @@ NEXT_PUBLIC_API_URL=http://localhost:8000
 | GET | `/api/video/frame` | Get current frame (JPEG) |
 | GET | `/api/video/status` | Video stream status |
 | GET | `/api/video/detected` | List of detected vehicles |
+
+### Speed Violation
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/speed-violations` | Speed violations list |
+| GET | `/api/speed-violation-stats` | Speed violation statistics |
+| POST | `/api/speed-limit` | Set speed limit |
+| GET | `/api/speed-limit` | Get current speed limit |
+
+### Reports
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/reports/ocr` | OCR model evaluation report |
+| GET | `/api/reports/speed-violations` | Speed violation report (last N days) |
+| GET | `/api/reports/comprehensive` | Comprehensive system report |
+| POST | `/api/reports/export` | Export report to JSON file |
 
 ### Parking
 
@@ -304,7 +333,9 @@ curl -X POST http://localhost:8000/api/process-image \
 - **Detection thresholds**: Adjustable via form data when calling API
 - **Telegram**: Configure token in `backend/src/utils/notifications.py`
 - **Model paths**: Default in `backend/files_model/`
+- **Speed limit**: Configurable via API (`/api/speed-limit`)
 - **CORS**: Allows all origins (can be restricted in `main.py`)
+- **GPU**: Automatic detection and model offloading via `device_utils.py`
 
 ### Frontend
 - **API URL**: Configure in `frontend/.env.local`
@@ -332,7 +363,7 @@ curl -X POST http://localhost:8000/api/process-image \
 
 The system has **9 functional tabs**:
 
-1. **Dashboard** 📊 – Overview statistics from all modules
+1. **Dashboard** 📊 – Overview statistics from all modules (traffic, parking, logistics, smartcity)
 2. **Parking** 🅿️ – Parking lot management (2 entry/exit cameras)
 3. **Logistics** 🚛 – Warehouse monitoring (2 gate/construction_site cameras)
 4. **SmartCity** 🏙️ – Urban monitoring (4 cameras cam1-cam4)
@@ -354,7 +385,7 @@ The system uses **SQLite** with separate databases for each module:
 | Parking | `database_parking.py` | Vehicle entry/exit from parking lot |
 | Logistics | `database_logistics.py` | Warehouse vehicle entry/exit, unknown vehicle alerts |
 | SmartCity | `database_smartcity.py` | Traffic flow, urban violations |
-| Test | `database_test.py` | Test data from image/video processing |
+| Test | `database_test.py` | Test data from image/video/webcam processing |
 
 ---
 
@@ -377,8 +408,10 @@ CHAT_ID = "your_chat_id"
 - When using **ROI detection**, you need to set up the ROI polygon first via the ROI Editor tab
 - **Bird's Eye View (BEV)** requires configuration of 4 source points (src_points) and 4 destination points (dst_points)
 - For **zone-based detection**, you need to adjust Y coordinates of zones to match camera angle
+- **Speed violation detection** uses ByteTrack tracking IDs and configurable speed limit (default: 60 km/h)
 - Image processing results are returned as **base64** for direct frontend display
 - All camera streaming supports both **webcam** (`source=0`) and **RTSP URL**
+- The system automatically detects and uses **GPU** if available, otherwise falls back to CPU
 
 ---
 

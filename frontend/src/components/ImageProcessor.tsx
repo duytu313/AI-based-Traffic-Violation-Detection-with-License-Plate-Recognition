@@ -7,16 +7,18 @@ import type { ProcessImageResponse, Config } from "@/lib/types";
 import ConfigPanel from "./ConfigPanel";
 
 const defaultConfig: Config = {
-  enable_violation_detection: true,
+  enable_violation_detection: false,
   enable_red_light_detection: false,
-  enable_bev_detection: true,
+  enable_bev_detection: false,
+  enable_speed_violation_detection: false,
   violation_conf_limit: 0.15,
   conf_more_than_two: 0.50,
   conf_no_helmet: 0.15,
   conf_using_mobile: 0.15,
   traffic_light_conf: 0.25,
+  speed_limit: 60,
   show_zones: false,
-  show_bev: true,
+  show_bev: false,
   camera_direction: "down",
 };
 

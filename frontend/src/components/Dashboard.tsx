@@ -1,19 +1,24 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { BarChart3, Car, AlertTriangle, Shield, TrendingUp } from "lucide-react";
-import { getStats } from "@/lib/api";
-import type { Stats } from "@/lib/types";
+import { BarChart3, Car, AlertTriangle, Shield, TrendingUp, Gauge } from "lucide-react";
+import { getStats, getSpeedViolationStats } from "@/lib/api";
+import type { Stats, SpeedViolationStats } from "@/lib/types";
 
 export default function Dashboard() {
   const [stats, setStats] = useState<Stats | null>(null);
+  const [speedStats, setSpeedStats] = useState<SpeedViolationStats | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetch = async () => {
       try {
-        const data = await getStats();
+        const [data, speedData] = await Promise.all([
+          getStats(),
+          getSpeedViolationStats().catch(() => null),
+        ]);
         setStats(data);
+        setSpeedStats(speedData);
       } catch {
         // silent
       } finally {
@@ -47,6 +52,13 @@ export default function Dashboard() {
       color: "text-red-400",
       bg: "bg-red-500/10",
     },
+    {
+      label: "Speed Violations",
+      value: speedStats?.total_speed_violations ?? 0,
+      icon: Gauge,
+      color: "text-orange-400",
+      bg: "bg-orange-500/10",
+    },
   ];
 
   return (
@@ -79,7 +91,7 @@ export default function Dashboard() {
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {cards.map((card) => (
             <div key={card.label} className="card">
               <div className="flex items-center justify-between mb-3">
@@ -113,6 +125,7 @@ export default function Dashboard() {
             <li>✅ Automatic license plate recognition (ANPR)</li>
             <li>✅ Violation detection: no helmet, carrying more than 2 people, using phone</li>
             <li>✅ Red light violation detection</li>
+            <li>✅ Speed violation detection</li>
             <li>✅ Telegram notifications</li>
             <li>✅ Database storage</li>
           </ul>
