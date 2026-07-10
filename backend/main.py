@@ -2095,6 +2095,63 @@ def set_speed_limit(speed_limit: int = Form(60)):
             stream.tracker.set_speed_limit(speed_limit)
     return {"status": "ok", "speed_limit": speed_limit}
 
+
+@app.post("/api/speed-calibration")
+async def set_speed_calibration(request: Request):
+    """
+    Set Bird's Eye View calibration for accurate speed estimation.
+    
+    Request Body JSON:
+        src_points: List of 4 source points [[x,y], ...] (trapezoid in image space)
+        dst_points: List of 4 destination points [[x,y], ...] (rectangle in BEV space)
+        pixels_per_meter: Calibration factor (pixels per meter in BEV space, default: 10.0)
+    """
+    data = await request.json()
+    
+    src_points = data.get("src_points", [])
+    dst_points = data.get("dst_points", [])
+    pixels_per_meter = float(data.get("pixels_per_meter", 10.0))
+    
+    if len(src_points) != 4 or len(dst_points) != 4:
+        raise HTTPException(status_code=400, detail="Must provide exactly 4 source and 4 destination points")
+    
+    # Convert to numpy arrays
+    src_array = np.array(src_points, dtype=np.float32)
+    dst_array = np.array(dst_points, dtype=np.float32)
+    
+    # Apply to all trackers
+    trackers = [camera_stream.tracker] + \
+               [s.tracker for s in parking_streams.values()] + \
+               [s.tracker for s in logistics_streams.values()] + \
+               [s.tracker for s in smartcity_streams.values()]
+    
+    for tracker in trackers:
+        if tracker and hasattr(tracker, 'set_bev_config'):
+            tracker.set_bev_config(src_array, dst_array, pixels_per_meter)
+    
+    return {
+        "status": "ok",
+        "message": "BEV calibration updated",
+        "pixels_per_meter": pixels_per_meter
+    }
+
+
+@app.get("/api/speed-calibration")
+def get_speed_calibration():
+    """Get current BEV calibration settings."""
+    tracker = camera_stream.tracker
+    if tracker and hasattr(tracker, 'bev_source_points') and tracker.bev_source_points is not None:
+        return {
+            "src_points": tracker.bev_source_points.tolist(),
+            "dst_points": tracker.bev_target_points.tolist(),
+            "pixels_per_meter": tracker.pixels_per_meter
+        }
+    return {
+        "src_points": None,
+        "dst_points": None,
+        "pixels_per_meter": 10.0
+    }
+
 @app.get("/api/speed-limit")
 def get_speed_limit():
     """Get current speed limit."""
