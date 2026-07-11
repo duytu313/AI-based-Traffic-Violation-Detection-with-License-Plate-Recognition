@@ -125,99 +125,41 @@ export default function VideoProcessor() {
 
         {/* Main Content - Video Stream */}
         <div className="lg:col-span-2 space-y-6">
+          {/* Live Stream Section */}
           <div className="card">
-            <h3 className="font-semibold text-white mb-4 flex items-center gap-2">
-              <Video className="w-4 h-4" />
-              Video Processing
-            </h3>
-
-            {/* Upload */}
-            {!isStreaming && (
-              <div className="border-2 border-dashed border-slate-600 rounded-lg p-8 text-center">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="video/mp4,video/avi,video/mov,video/mkv"
-                  onChange={handleFileChange}
-                  className="hidden"
-                  id="video-input"
-                />
-                <label htmlFor="video-input" className="cursor-pointer flex flex-col items-center gap-3">
-                  <div className="w-16 h-16 rounded-full bg-purple-500/10 flex items-center justify-center">
-                    <Upload className="w-8 h-8 text-purple-400" />
-                  </div>
-                  <div>
-                    <p className="text-lg font-medium text-white">Select video to process</p>
-                    <p className="text-sm text-slate-400 mt-1">MP4, AVI, MOV, MKV</p>
-                  </div>
-                </label>
-              </div>
-            )}
-
-            {/* File info & controls */}
-            {file && (
-              <div className="mt-4 space-y-4">
-                <div className="p-3 bg-slate-800/50 rounded-lg flex items-center justify-between">
-                  <span className="text-sm text-slate-300 truncate">{file.name}</span>
-                  {!isStreaming && (
-                    <button onClick={reset} className="p-1 hover:bg-slate-700 rounded">
-                      <X className="w-4 h-4 text-slate-400" />
-                    </button>
-                  )}
-                </div>
-
-                {!isStreaming && (
+            {/* Header with controls */}
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold text-white flex items-center gap-2">
+                <Video className="w-4 h-4" />
+                Live Stream
+              </h3>
+              <div className="flex items-center gap-2">
+                {/* Start/Stop Button */}
+                {file && (
                   <button
-                    onClick={handleStartStream}
+                    onClick={isStreaming ? handleStopStream : handleStartStream}
                     disabled={loading}
-                    className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-700 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
+                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
+                      isStreaming
+                        ? "bg-red-600 hover:bg-red-700 text-white"
+                        : "bg-blue-600 hover:bg-blue-700 disabled:bg-slate-700 text-white"
+                    }`}
                   >
-                    <Play className="w-4 h-4" />
-                    {loading ? "Processing..." : "Start video processing"}
+                    {isStreaming ? (
+                      <>
+                        <Square className="w-4 h-4" />
+                        Stop
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-4 h-4" />
+                        {loading ? "Processing..." : "Start"}
+                      </>
+                    )}
                   </button>
                 )}
-
-                {isStreaming && (
-                  <button
-                    onClick={handleStopStream}
-                    className="w-full px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
-                  >
-                    <Square className="w-4 h-4" />
-                    Stop and select another video
-                  </button>
-                )}
-              </div>
-            )}
-
-            {error && (
-              <div className="mt-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-sm text-red-300">
-                {error}
-              </div>
-            )}
-
-            {/* Status */}
-            {status && isStreaming && (
-              <div className="mt-4 p-3 bg-slate-800/50 rounded-lg flex items-center gap-3 text-sm">
-                <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-                <span className="text-slate-300">
-                  Status: <strong>Running</strong>
-                </span>
-                <span className="text-slate-400">|</span>
-                <span className="text-slate-300">
-                  FPS: <strong className="text-yellow-400">{status.fps || 0}</strong>
-                </span>
-              </div>
-            )}
-          </div>
-
-          {/* Video Stream Display */}
-          {frameUrl && isStreaming && (
-            <div className="card">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-semibold text-white flex items-center gap-2">
-                  <Video className="w-4 h-4" />
-                  Live Stream
-                </h3>
+                
+                {/* Draw 3D Zone Button */}
                 <button
                   onClick={() => setShowBEVEditor(!showBEVEditor)}
                   className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
@@ -229,113 +171,237 @@ export default function VideoProcessor() {
                   🛠️ {showBEVEditor ? "Drawing BEV..." : "Draw 3D Zone"}
                 </button>
               </div>
+            </div>
 
-              {/* BEV Editor */}
-              {showBEVEditor && (
-                <div className="mb-4">
-                  <BEVEditor
-                    imageUrl={frameUrl}
-                    initialPoints={bevPoints}
-                    onSave={async (points) => {
-                      setBEVPoints(points);
-                      try {
-                        await setBEVConfig(points);
-                      } catch {
-                        // Backend unavailable - points are saved locally
-                      }
-                      setShowBEVEditor(false);
-                    }}
-                    onCancel={() => setShowBEVEditor(false)}
-                  />
-                </div>
-              )}
+            {/* BEV Editor */}
+            {showBEVEditor && (
+              <div className="mb-4">
+                <BEVEditor
+                  imageUrl={frameUrl || ""}
+                  initialPoints={bevPoints}
+                  onSave={async (points) => {
+                    setBEVPoints(points);
+                    try {
+                      await setBEVConfig(points);
+                    } catch {
+                      // Backend unavailable - points are saved locally
+                    }
+                    setShowBEVEditor(false);
+                  }}
+                  onCancel={() => setShowBEVEditor(false)}
+                />
+              </div>
+            )}
 
-              {/* Video Frame */}
-              {!showBEVEditor && (
+            {/* Video Frame - Always visible */}
+            <div className="relative bg-slate-900/50 rounded-lg overflow-hidden mb-3" style={{ minHeight: "400px" }}>
+              {frameUrl ? (
                 <img
                   src={frameUrl}
                   alt="Video stream"
                   className="w-full rounded-lg"
                   style={{ maxHeight: "600px", objectFit: "contain" }}
                 />
+              ) : (
+                <div className="flex items-center justify-center" style={{ minHeight: "400px" }}>
+                  <div className="text-center">
+                    <Video className="w-16 h-16 text-slate-600 mx-auto mb-3" />
+                    <p className="text-slate-400">Start video to see live stream</p>
+                  </div>
+                </div>
               )}
             </div>
-          )}
+
+            {/* Upload - Compact - Integrated with Live Stream */}
+            {!file && !isStreaming && (
+              <div className="border-2 border-dashed border-slate-600 rounded-lg p-2 text-center cursor-pointer" style={{ minHeight: "40px" }}>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="video/mp4,video/avi,video/mov,video/mkv"
+                  onChange={handleFileChange}
+                  className="hidden"
+                  id="video-input"
+                />
+                <label htmlFor="video-input" className="cursor-pointer flex flex-col items-center gap-1">
+                  <Upload className="w-5 h-5 text-purple-400" />
+                  <div>
+                    <p className="text-sm font-medium text-white">Select video</p>
+                    <p className="text-xs text-slate-400">MP4, AVI, MOV, MKV</p>
+                  </div>
+                </label>
+              </div>
+            )}
+
+            {/* File info - shown when file is selected */}
+            {file && !isStreaming && (
+              <div className="p-2 bg-slate-800/50 rounded-lg flex items-center justify-between">
+                <span className="text-sm text-slate-300 truncate">{file.name}</span>
+                <button onClick={reset} className="p-1 hover:bg-slate-700 rounded">
+                  <X className="w-4 h-4 text-slate-400" />
+                </button>
+              </div>
+            )}
+
+            {error && (
+              <div className="mt-3 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-sm text-red-300">
+                {error}
+              </div>
+            )}
+          </div>
+
+          {/* Detected Violations Section - Horizontal 3 Columns - Always Visible */}
+          <div className="card">
+            <h3 className="font-semibold text-white mb-4 flex items-center gap-2">
+              <Car className="w-4 h-4" />
+              Detected Violations
+            </h3>
+
+            <div className="grid grid-cols-3 gap-3">
+              {[0, 1, 2].map((index) => {
+                const violation = detected?.violations?.[index];
+                const hasViolation = violation?.details;
+                
+                return (
+                  <div
+                    key={index}
+                    className={`p-3 rounded-lg border-2 transition-all ${
+                      hasViolation
+                        ? "bg-red-500/10 border-red-500/20"
+                        : "bg-slate-800/20 border-slate-700 border-dashed"
+                    }`}
+                    style={{ minHeight: "180px" }}
+                  >
+                    {hasViolation ? (
+                      <>
+                        {/* Vehicle/Violation Image */}
+                        {violation.crop_b64 && (
+                          <div className="mb-2 flex items-center justify-center bg-slate-900/50 rounded-lg p-2" style={{ minHeight: "100px" }}>
+                            <img
+                              src={`data:image/jpeg;base64,${violation.crop_b64}`}
+                              alt="Violation"
+                              className="w-full rounded"
+                              style={{ maxHeight: "100px", objectFit: "contain" }}
+                            />
+                          </div>
+                        )}
+
+                        {/* Violation Details */}
+                        <div className="space-y-1">
+                          <p className="text-sm font-bold text-red-300 text-center">
+                            {violation.details}
+                          </p>
+                          
+                          {/* Vehicle Info */}
+                          {violation.vehicle_info && (
+                            <div className="text-xs space-y-0.5 mt-2">
+                              {violation.vehicle_info.type && (
+                                <p className="text-slate-300">
+                                  <span className="text-slate-400">Type:</span> <span className="text-white">{violation.vehicle_info.type}</span>
+                                </p>
+                              )}
+                              {violation.vehicle_info.color && (
+                                <p className="text-slate-300">
+                                  <span className="text-slate-400">Color:</span> 
+                                  <span className="inline-block w-3 h-3 rounded-full ml-1" style={{ backgroundColor: violation.vehicle_info.color.toLowerCase() }}></span>
+                                  <span className="text-white ml-1">{violation.vehicle_info.color}</span>
+                                </p>
+                              )}
+                              {violation.plate_text && (
+                                <p className="text-slate-300">
+                                  <span className="text-slate-400">Plate:</span> <span className="text-green-400 font-mono">{violation.plate_text}</span>
+                                </p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="flex items-center justify-center" style={{ minHeight: "160px" }}>
+                        <div className="text-center">
+                          <p className="text-xs text-slate-500">Slot {index + 1}</p>
+                          <p className="text-xs text-slate-600 mt-1">Waiting for violation...</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {detected && detected.violations && detected.violations.length > 3 && (
+              <p className="text-xs text-slate-400 text-center mt-3">
+                Showing latest 3 of {detected.violations.length} violations
+              </p>
+            )}
+          </div>
         </div>
 
-        {/* Right Sidebar - Detected Items */}
+        {/* Right Sidebar - Detected License Plates */}
         <div className="lg:col-span-1">
           <div className="card sticky top-20">
             <h3 className="font-semibold text-white mb-4 flex items-center gap-2">
               <Car className="w-4 h-4" />
-              Recent Detections
+              Detected License Plates
             </h3>
 
-            {!detected || (detected.vehicles.length === 0 && detected.violations.length === 0) ? (
-              <p className="text-sm text-slate-400 text-center py-8">
-                No vehicles detected
+            <div className="space-y-3">
+              {/* 3 fixed slots for license plates */}
+              {[0, 1, 2].map((index) => {
+                const vehicle = detected?.vehicles?.[index];
+                const hasPlate = vehicle?.plate_text;
+                
+                return (
+                  <div
+                    key={index}
+                    className={`p-3 rounded-lg border-2 transition-all ${
+                      hasPlate
+                        ? "bg-slate-800/50 border-green-500/50"
+                        : "bg-slate-800/20 border-slate-700 border-dashed"
+                    }`}
+                    style={{ minHeight: "160px" }}
+                  >
+                    {hasPlate ? (
+                      <div className="flex gap-3 items-center h-full">
+                        {/* License plate image - 2/3 width */}
+                        {vehicle.plate_b64 && (
+                          <div className="w-2/3 flex items-center justify-center">
+                            <img
+                              src={`data:image/jpeg;base64,${vehicle.plate_b64}`}
+                              alt="License Plate"
+                              className="w-full rounded"
+                              style={{ maxHeight: "140px", objectFit: "contain" }}
+                            />
+                          </div>
+                        )}
+                        {/* License plate text - 1/3 width */}
+                        <div className={vehicle.plate_b64 ? "w-1/3" : "w-full flex items-center justify-center"}>
+                          <p className="text-base font-bold text-white font-mono text-center whitespace-nowrap overflow-hidden text-ellipsis" title={vehicle.plate_text}>
+                            {vehicle.plate_text}
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-center" style={{ minHeight: "140px" }}>
+                        <div className="text-center">
+                          <p className="text-xs text-slate-500">Slot {index + 1}</p>
+                          <p className="text-xs text-slate-600 mt-1">Waiting for detection...</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {!detected || detected.vehicles.length === 0 ? (
+              <p className="text-xs text-slate-500 text-center mt-3">
+                Start video to detect license plates
               </p>
-            ) : (
-              <div className="space-y-4 max-h-[calc(100vh-200px)] overflow-y-auto">
-                {/* Vehicles */}
-                {detected.vehicles.map((v: any, i: number) => (
-                  <div key={i} className="p-2 bg-slate-800/50 rounded-lg space-y-2">
-                    {/* Vehicle crop */}
-                    {v.vehicle_b64 && (
-                      <div>
-                        <p className="text-xs text-slate-400 mb-1">Vehicle</p>
-                        <img
-                          src={`data:image/jpeg;base64,${v.vehicle_b64}`}
-                          alt="Vehicle"
-                          className="w-full rounded"
-                        />
-                      </div>
-                    )}
-
-                    {/* Plate crop */}
-                    {v.plate_b64 && (
-                      <div>
-                        <p className="text-xs text-slate-400 mb-1">License Plate</p>
-                        <img
-                          src={`data:image/jpeg;base64,${v.plate_b64}`}
-                          alt="Plate"
-                          className="w-full rounded border border-green-500/50"
-                        />
-                      </div>
-                    )}
-
-                    {/* Info */}
-                    <div className="text-xs space-y-1">
-                      <p className="text-green-400 font-medium">{v.info}</p>
-                      {v.plate_text && (
-                        <p className="text-slate-300">License Plate: <span className="text-white">{v.plate_text}</span></p>
-                      )}
-                    </div>
-                  </div>
-                ))}
-
-                {/* Violations */}
-                {detected.violations.map((v: any, i: number) => (
-                  <div key={i} className="p-2 bg-red-500/10 border border-red-500/20 rounded-lg space-y-2">
-                    {v.crop_b64 && (
-                      <div>
-                        <p className="text-xs text-red-400 mb-1">Violation</p>
-                        <img
-                          src={`data:image/jpeg;base64,${v.crop_b64}`}
-                          alt="Violation"
-                          className="w-full rounded"
-                        />
-                      </div>
-                    )}
-                    <div className="text-xs space-y-1">
-                      <p className="text-red-300 font-medium">{v.details}</p>
-                      {v.plate_text && (
-                        <p className="text-slate-400">License Plate: {v.plate_text}</p>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
+            ) : detected.vehicles.length > 3 && (
+              <p className="text-xs text-slate-400 text-center mt-3">
+                Showing latest 3 of {detected.vehicles.length} detections
+              </p>
             )}
           </div>
         </div>

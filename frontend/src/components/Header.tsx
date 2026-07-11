@@ -13,9 +13,15 @@ export default function Header({ isConnected }: HeaderProps) {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl overflow-hidden bg-slate-800 flex items-center justify-center">
-              <Image src="/image/logo.png" alt="Traffic AI" width={40} height={40} className="object-cover" />
-            </div>
+              <div className="w-10 h-10 rounded-xl overflow-hidden bg-slate-800 relative">
+                <Image 
+                  src="/image/logo.png" 
+                  alt="Traffic AI" 
+                  fill
+                  className="object-contain"
+                  sizes="40px"
+                />
+              </div>
             <div>
               <h1 className="text-lg font-bold text-white leading-tight">
                 Traffic AI
