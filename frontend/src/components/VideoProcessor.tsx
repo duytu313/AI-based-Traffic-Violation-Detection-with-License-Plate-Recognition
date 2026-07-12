@@ -402,13 +402,18 @@ export default function VideoProcessor() {
             </h3>
 
             <div className="grid grid-cols-3 gap-3">
-              {[0, 1, 2].map((index) => {
-                const violation = detected?.violations?.[index];
+              {[0, 1, 2].map((slotIndex) => {
+                // Show the latest 3 violations in reverse order (newest first)
+                const violations = detected?.violations || [];
+                const totalViolations = violations.length;
+                // Map slot 0 -> newest violation, slot 1 -> 2nd newest, slot 2 -> 3rd newest
+                const violationIndex = totalViolations - 1 - slotIndex;
+                const violation = violationIndex >= 0 ? violations[violationIndex] : null;
                 const hasViolation = violation?.details;
                 
                 return (
                   <div
-                    key={index}
+                    key={slotIndex}
                     className={`p-3 rounded-lg border-2 transition-all ${
                       hasViolation
                         ? "bg-red-500/10 border-red-500/20"
@@ -475,7 +480,7 @@ export default function VideoProcessor() {
                     ) : (
                       <div className="flex items-center justify-center" style={{ minHeight: "160px" }}>
                         <div className="text-center">
-                          <p className="text-xs text-slate-500">Slot {index + 1}</p>
+                          <p className="text-xs text-slate-500">Slot {slotIndex + 1}</p>
                           <p className="text-xs text-slate-600 mt-1">Waiting for violation...</p>
                         </div>
                       </div>
@@ -502,14 +507,28 @@ export default function VideoProcessor() {
             </h3>
 
             <div className="space-y-3">
-              {/* 3 fixed slots for license plates */}
-              {[0, 1, 2].map((index) => {
-                const vehicle = detected?.vehicles?.[index];
+              {/* 3 fixed slots for license plates - show latest 3 unique vehicles in reverse order (newest first) */}
+              {[0, 1, 2].map((slotIndex) => {
+                // Deduplicate vehicles by plate_text to prevent showing same vehicle multiple times
+                const vehicles = detected?.vehicles || [];
+                const uniqueVehiclesMap = new Map();
+                for (const v of vehicles) {
+                  // Use plate_text as key, or info if no plate
+                  // This ensures each unique vehicle appears only once
+                  const key = v.plate_text?.trim() || v.info || `unknown_${slotIndex}`;
+                  // Keep the latest entry (overwrite previous) - this ensures better confidence updates
+                  uniqueVehiclesMap.set(key, v);
+                }
+                const uniqueVehicles = Array.from(uniqueVehiclesMap.values());
+                const totalVehicles = uniqueVehicles.length;
+                // Map slot 0 -> newest vehicle, slot 1 -> 2nd newest, slot 2 -> 3rd newest
+                const vehicleIndex = totalVehicles - 1 - slotIndex;
+                const vehicle = vehicleIndex >= 0 ? uniqueVehicles[vehicleIndex] : null;
                 const hasPlate = vehicle?.plate_text;
                 
                 return (
                   <div
-                    key={index}
+                    key={slotIndex}
                     className={`p-3 rounded-lg border-2 transition-all ${
                       hasPlate
                         ? "bg-slate-800/50 border-green-500/50"
@@ -540,7 +559,7 @@ export default function VideoProcessor() {
                     ) : (
                       <div className="flex items-center justify-center" style={{ minHeight: "140px" }}>
                         <div className="text-center">
-                          <p className="text-xs text-slate-500">Slot {index + 1}</p>
+                          <p className="text-xs text-slate-500">Slot {slotIndex + 1}</p>
                           <p className="text-xs text-slate-600 mt-1">Waiting for detection...</p>
                         </div>
                       </div>

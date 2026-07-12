@@ -1922,9 +1922,11 @@ def get_video_detected():
             })
 
         violations = []
-        for v in video_stream.violation_items[-10:]:
-            # Handle tuple with extra info: (crop, plate_text, vtype, details, viol_info)
-            # or (crop, plate_text, vtype, details, viol_info, vehicle_type, color)
+        # Deduplicate violations: keep only the latest (highest confidence) per (track_id, violation_type)
+        # This prevents showing the same violation multiple times for the same vehicle
+        # But different violation types for the same vehicle will still show separately
+        seen_violations = {}  # key: (track_id, vtype_code) -> violation dict
+        for v in reversed(video_stream.violation_items[-50:]):  # Check last 50 to find best confidence
             vehicle_crop = v[0]
             plate_text = v[1] if len(v) > 1 else ""
             vtype_code = v[2] if len(v) > 2 else "VIOLATION"
@@ -1932,29 +1934,69 @@ def get_video_detected():
             viol_info = v[4] if len(v) > 4 else ""
             vehicle_type = v[5] if len(v) > 5 else ""
             color = v[6] if len(v) > 6 else ""
+            trk_id = v[7] if len(v) > 7 else None  # track_id for deduplication
             
             # Parse vehicle_type and color from viol_info if not provided separately
             if not vehicle_type and not color:
-                # Try to extract from viol_info pattern: "🚨 RED LIGHT ABC123 (red car)"
                 import re
                 match = re.search(r'\((\w+)\s+(\w+)\)', viol_info)
                 if match:
                     color = match.group(1)
                     vehicle_type = match.group(2)
             
-            crop_b64 = None
-            if vehicle_crop is not None and vehicle_crop.size > 0:
-                _, buf = cv2.imencode('.jpg', vehicle_crop)
-                crop_b64 = base64.b64encode(buf).decode('utf-8')
-            violations.append({
-                "crop_b64": crop_b64,
-                "plate_text": plate_text,
-                "type": vtype_code,
-                "details": details,
-                "info": viol_info,
-                "vehicle_type": vehicle_type,
-                "color": color,
-            })
+            # Create unique key for this violation (track_id + violation type)
+            # If no track_id, use plate_text + violation_type as key
+            if trk_id is not None:
+                violation_key = (trk_id, vtype_code)
+            else:
+                violation_key = (plate_text, vtype_code)
+            
+            # Only keep the first occurrence (which is the latest due to reversed iteration)
+            # This ensures we keep the most recent/best confidence violation
+            if violation_key not in seen_violations:
+                crop_b64 = None
+                if vehicle_crop is not None and vehicle_crop.size > 0:
+                    _, buf = cv2.imencode('.jpg', vehicle_crop)
+                    crop_b64 = base64.b64encode(buf).decode('utf-8')
+                seen_violations[violation_key] = {
+                    "crop_b64": crop_b64,
+                    "plate_text": plate_text,
+                    "type": vtype_code,
+                    "details": details,
+                    "info": viol_info,
+                    "vehicle_type": vehicle_type,
+                    "color": color,
+                }
+        
+        # Convert to list and take only the last 10 (most recent)
+        violations = list(seen_violations.values())[-10:]
+        
+        # Deduplicate vehicles: keep only the latest entry for each track_id
+        # This prevents showing the same vehicle multiple times
+        seen_vehicles = {}  # key: track_id or plate_text -> vehicle dict
+        for p in reversed(video_stream.detected_items[-20:]):  # Check last 20 to find latest
+            vehicle_crop, plate_img, plate_text, info = p
+            # Use plate_text as key for deduplication
+            vehicle_key = plate_text.strip() if plate_text and plate_text.strip() else info
+            # Only keep the first occurrence (which is the latest due to reversed iteration)
+            if vehicle_key not in seen_vehicles:
+                vehicle_b64 = None
+                plate_b64 = None
+                if vehicle_crop is not None and vehicle_crop.size > 0:
+                    _, buf = cv2.imencode('.jpg', vehicle_crop)
+                    vehicle_b64 = base64.b64encode(buf).decode('utf-8')
+                if plate_img is not None and plate_img.size > 0:
+                    _, buf = cv2.imencode('.jpg', plate_img)
+                    plate_b64 = base64.b64encode(buf).decode('utf-8')
+                seen_vehicles[vehicle_key] = {
+                    "vehicle_b64": vehicle_b64,
+                    "plate_b64": plate_b64,
+                    "plate_text": plate_text,
+                    "info": info
+                }
+        
+        # Convert to list and take only the last 10 (most recent)
+        vehicles = list(seen_vehicles.values())[-10:]
         return {"vehicles": vehicles, "violations": violations}
     except Exception as e:
         print(f"Error getting video detected: {e}")
