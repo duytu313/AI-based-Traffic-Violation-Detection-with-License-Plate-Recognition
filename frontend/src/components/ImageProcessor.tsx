@@ -75,7 +75,7 @@ export default function ImageProcessor() {
   };
 
   const handleProcess = async () => {
-    if (!file) return;
+    if (!file || loading) return;  // Prevent double-click
     setLoading(true);
     setError(null);
     try {

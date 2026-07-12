@@ -54,6 +54,10 @@ export default function VideoProcessor() {
     setIsPaused(false);
     isPausedRef.current = false;
     try {
+      // Stop any existing stream first to prevent conflicts
+      if (isStreaming) {
+        await stopVideoStream();
+      }
       await startVideoStream(file, config);
       setIsStreaming(true);
       setStatus({ running: true });
@@ -172,10 +176,11 @@ export default function VideoProcessor() {
     try {
       const statusRes = await getVideoStatus();
       if (statusRes) {
+        console.log("[FRONTEND DEBUG] Status:", statusRes);
         setStatus(statusRes);
         // If backend says not running, auto-stop
         if (!statusRes.running && isStreaming) {
-          console.log("Video processing ended");
+          console.log("Video processing ended - auto stopping");
           setIsStreaming(false);
           if (intervalRef.current) clearInterval(intervalRef.current);
           if (detectedIntervalRef.current) clearInterval(detectedIntervalRef.current);
@@ -507,23 +512,17 @@ export default function VideoProcessor() {
             </h3>
 
             <div className="space-y-3">
-              {/* 3 fixed slots for license plates - show latest 3 unique vehicles in reverse order (newest first) */}
+              {/* 3 fixed slots for license plates - show latest 3 vehicles WITH plates (newest first) */}
               {[0, 1, 2].map((slotIndex) => {
-                // Deduplicate vehicles by plate_text to prevent showing same vehicle multiple times
-                const vehicles = detected?.vehicles || [];
-                const uniqueVehiclesMap = new Map();
-                for (const v of vehicles) {
-                  // Use plate_text as key, or info if no plate
-                  // This ensures each unique vehicle appears only once
-                  const key = v.plate_text?.trim() || v.info || `unknown_${slotIndex}`;
-                  // Keep the latest entry (overwrite previous) - this ensures better confidence updates
-                  uniqueVehiclesMap.set(key, v);
-                }
-                const uniqueVehicles = Array.from(uniqueVehiclesMap.values());
-                const totalVehicles = uniqueVehicles.length;
+                // Only show vehicles that have license plates
+                const allVehicles = detected?.vehicles || [];
+                console.log("[FRONTEND DEBUG] All vehicles:", allVehicles.map((v: any) => ({ plate: v.plate_text, hasB64: !!v.plate_b64 })));
+                const vehicles = allVehicles.filter((v: any) => v.plate_text && v.plate_text.trim() !== "");
+                console.log("[FRONTEND DEBUG] Filtered vehicles with plates:", vehicles.length, "out of", allVehicles.length);
+                const totalVehicles = vehicles.length;
                 // Map slot 0 -> newest vehicle, slot 1 -> 2nd newest, slot 2 -> 3rd newest
                 const vehicleIndex = totalVehicles - 1 - slotIndex;
-                const vehicle = vehicleIndex >= 0 ? uniqueVehicles[vehicleIndex] : null;
+                const vehicle = vehicleIndex >= 0 ? vehicles[vehicleIndex] : null;
                 const hasPlate = vehicle?.plate_text;
                 
                 return (

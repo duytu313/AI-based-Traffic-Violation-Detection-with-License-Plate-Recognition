@@ -1200,12 +1200,9 @@ class CameraStream:
             consolidated_plate, is_finalized = track_mem.get_best_plate()
             display_plate = consolidated_plate if consolidated_plate else plate_text
             
-            # Skip if no plate and no violations
-            if not display_plate and not vehicle_viols:
-                continue
-            
             # Check if this track is new to detected_items (not just active_tracks)
             is_new_detection = trk_id not in self.detected_track_ids
+            print(f"[DEBUG] Track {trk_id}: display_plate='{display_plate}', is_new={is_new_detection}")
             
             # Only add to detected_items ONCE per track (when first seen)
             if is_new_detection:
@@ -1439,10 +1436,11 @@ class VideoStreamProcessor:
         self.fps = 0.0
         self.frame_count = 0
         self.last_fps_time = time.time()
-        self.detected_items = []
-        self.detected_track_ids.clear()  # Reset track IDs for new video
-        self.detected_track_index.clear()  # Reset index mapping
-        self.violation_items = []
+        # Reset all tracking state for new video
+        self.detected_items.clear()
+        self.detected_track_ids.clear()
+        self.detected_track_index.clear()
+        self.violation_items.clear()
         self._violation_keys.clear()
         self._paused_frame = None
         threading.Thread(target=self._loop, daemon=True).start()
@@ -1655,31 +1653,38 @@ class VideoStreamProcessor:
 
         # ======================== DEDUPLICATED DETECTED ITEMS ========================
         # Use consolidated plate text and ensure each track appears only once
+        print(f"[DEBUG] Processing {len(tracked)} tracked vehicles")
+        print(f"[DEBUG] Current detected_items: {len(self.detected_items)}, detected_track_ids: {len(self.detected_track_ids)}")
+        
         for trk_id, bbox, cls_id, conf in tracked:
-            x1, y1, x2, y2 = bbox
-            found = find_vehicle_context_by_bbox(vehicles, matched, bbox)
-            if found is None:
+            try:
+                x1, y1, x2, y2 = bbox
+                found = find_vehicle_context_by_bbox(vehicles, matched, bbox)
+                if found is None:
+                    print(f"[DEBUG] Track {trk_id}: no matching vehicle found")
+                    continue
+                matched_bbox, vtype, color, plate_img, plate_text = found
+                vehicle_viols = vehicle_violation_map.get(tuple(matched_bbox), [])
+            except Exception as e:
+                print(f"[DEBUG] Track {trk_id}: error processing track: {e}")
                 continue
-            matched_bbox, vtype, color, plate_img, plate_text = found
-            vehicle_viols = vehicle_violation_map.get(tuple(matched_bbox), [])
             
             # Get consolidated plate text from OCR consolidator (voting across frames)
             track_mem = ocr_consolidator.get_track_memory(trk_id)
             consolidated_plate, is_finalized = track_mem.get_best_plate()
             display_plate = consolidated_plate if consolidated_plate else plate_text
             
-            # Skip if no plate and no violations
-            if not display_plate and not vehicle_viols:
-                continue
-            
-            # Check if this track is new to detected_items
+            # Check if this track is new to detected_items (not just active_tracks)
             is_new_detection = trk_id not in self.detected_track_ids
+            print(f"[DEBUG] Track {trk_id}: is_new_detection={is_new_detection}, plate={display_plate}")
             
             if is_new_detection:
                 self.detected_track_ids.add(trk_id)
                 vehicle_crop, _ = crop_vehicle_context(frame, (x1, y1, x2, y2), vtype)
                 info = f"{color} {vtype} | {display_plate}"
-                self.detected_items.append((vehicle_crop, plate_img, display_plate, info))
+                # Use best_plate_img from OCR consolidator for better quality plate images
+                best_plate = track_mem.best_plate_img if track_mem.best_plate_img is not None else plate_img
+                self.detected_items.append((vehicle_crop, best_plate, display_plate, info))
                 # Store index and vote count for fast updates later
                 current_votes = track_mem.ocr_results.get(display_plate, 0)
                 self.detected_track_index[trk_id] = (len(self.detected_items) - 1, current_votes)
@@ -1696,7 +1701,9 @@ class VideoStreamProcessor:
                             # Only update if new plate has more votes (higher confidence)
                             if consolidated_plate != old_plate_text and new_votes > old_votes:
                                 new_info = f"{color} {vtype} | {consolidated_plate}"
-                                self.detected_items[idx] = (track_mem.best_vehicle_crop or old_crop, plate_img, consolidated_plate, new_info)
+                                # Use best_plate_img from OCR consolidator for better quality plate images
+                                best_plate = track_mem.best_plate_img if track_mem.best_plate_img is not None else plate_img
+                                self.detected_items[idx] = (track_mem.best_vehicle_crop or old_crop, best_plate, consolidated_plate, new_info)
                                 # Update stored vote count
                                 self.detected_track_index[trk_id] = (idx, new_votes)
         
@@ -1971,32 +1978,26 @@ def get_video_detected():
         # Convert to list and take only the last 10 (most recent)
         violations = list(seen_violations.values())[-10:]
         
-        # Deduplicate vehicles: keep only the latest entry for each track_id
-        # This prevents showing the same vehicle multiple times
-        seen_vehicles = {}  # key: track_id or plate_text -> vehicle dict
-        for p in reversed(video_stream.detected_items[-20:]):  # Check last 20 to find latest
+        # Return last 10 vehicles (no deduplication - each track_id already has ONE entry in detected_items)
+        # The deduplication is done in VideoStreamProcessor._process_frame() which ensures
+        # each track_id appears only once in detected_items
+        vehicles = []
+        for p in video_stream.detected_items[-10:]:
             vehicle_crop, plate_img, plate_text, info = p
-            # Use plate_text as key for deduplication
-            vehicle_key = plate_text.strip() if plate_text and plate_text.strip() else info
-            # Only keep the first occurrence (which is the latest due to reversed iteration)
-            if vehicle_key not in seen_vehicles:
-                vehicle_b64 = None
-                plate_b64 = None
-                if vehicle_crop is not None and vehicle_crop.size > 0:
-                    _, buf = cv2.imencode('.jpg', vehicle_crop)
-                    vehicle_b64 = base64.b64encode(buf).decode('utf-8')
-                if plate_img is not None and plate_img.size > 0:
-                    _, buf = cv2.imencode('.jpg', plate_img)
-                    plate_b64 = base64.b64encode(buf).decode('utf-8')
-                seen_vehicles[vehicle_key] = {
-                    "vehicle_b64": vehicle_b64,
-                    "plate_b64": plate_b64,
-                    "plate_text": plate_text,
-                    "info": info
-                }
-        
-        # Convert to list and take only the last 10 (most recent)
-        vehicles = list(seen_vehicles.values())[-10:]
+            vehicle_b64 = None
+            plate_b64 = None
+            if vehicle_crop is not None and vehicle_crop.size > 0:
+                _, buf = cv2.imencode('.jpg', vehicle_crop)
+                vehicle_b64 = base64.b64encode(buf).decode('utf-8')
+            if plate_img is not None and plate_img.size > 0:
+                _, buf = cv2.imencode('.jpg', plate_img)
+                plate_b64 = base64.b64encode(buf).decode('utf-8')
+            vehicles.append({
+                "vehicle_b64": vehicle_b64,
+                "plate_b64": plate_b64,
+                "plate_text": plate_text,
+                "info": info
+            })
         return {"vehicles": vehicles, "violations": violations}
     except Exception as e:
         print(f"Error getting video detected: {e}")
