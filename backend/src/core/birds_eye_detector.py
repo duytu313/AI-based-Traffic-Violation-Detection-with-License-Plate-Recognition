@@ -158,6 +158,7 @@ class BirdsEyeRedLightDetector:
         """
         Update red light status from traffic light list.
         Like Colab: check class name has "trafficLight" and "red".
+        Also uses analyzed state from infer_traffic_light_state().
         
         Update red_light_counter with buffer to prevent flickering.
         """
@@ -165,7 +166,9 @@ class BirdsEyeRedLightDetector:
         yolo_detected_red = False
         for light in lights:
             cls_name = light.get("class_name", "").lower()
-            if "trafficlight" in cls_name and "red" in cls_name:
+            state = light.get("state", "").lower()
+            # Check both YOLO class name AND analyzed state
+            if ("trafficlight" in cls_name and "red" in cls_name) or state == "red":
                 yolo_detected_red = True
                 break
 

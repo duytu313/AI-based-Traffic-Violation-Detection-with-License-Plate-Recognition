@@ -1,7 +1,9 @@
 import axios from "axios";
 import type { Config, ProcessImageResponse, DBVehicle, DBViolation, Stats } from "./types";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+// Use relative URL so Next.js rewrites proxy API requests to backend
+// If NEXT_PUBLIC_API_URL is set, use it directly (for production/deployment)
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "";
 
 const api = axios.create({
   baseURL: API_BASE_URL,

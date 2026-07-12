@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { Upload, X, Video, Play, Square, Car, MousePointer2 } from "lucide-react";
-import { startVideoStream, stopVideoStream, getVideoFrame, getVideoStatus, getVideoDetected, setBEVConfig } from "@/lib/api";
+import { startVideoStream, stopVideoStream, getVideoFrame, getVideoStatus, getVideoDetected, setBEVConfig, healthCheck } from "@/lib/api";
 import type { Config, ROIPoint } from "@/lib/types";
 import ConfigPanel from "./ConfigPanel";
 import BEVEditor from "./BEVEditor";
@@ -69,11 +69,13 @@ export default function VideoProcessor() {
     } catch {}
   };
 
-  const fetchFrame = async () => {
+  const fetchFrame = useCallback(async () => {
     if (!isStreaming) return;
+    
+    // Fetch frame, status, and detected independently so one failure doesn't block others
     try {
       const frameRes = await getVideoFrame();
-      if (frameRes) {
+      if (frameRes && frameRes.size > 0) {
         const blob = new Blob([frameRes], { type: "image/jpeg" });
         const url = URL.createObjectURL(blob);
         setFrameUrl((prev) => {
@@ -81,29 +83,67 @@ export default function VideoProcessor() {
           return url;
         });
       }
+    } catch (err: any) {
+      console.error("Fetch frame error:", err);
+      // Don't set error immediately - it could be a temporary blip
+    }
+    
+    try {
       const statusRes = await getVideoStatus();
       if (statusRes) setStatus(statusRes);
+    } catch (err: any) {
+      console.error("Fetch status error:", err);
+    }
+    
+    try {
       const detectedRes = await getVideoDetected();
       if (detectedRes) setDetected(detectedRes);
-    } catch {}
-  };
+    } catch (err: any) {
+      console.error("Fetch detected error:", err);
+    }
+  }, [isStreaming]);
 
   useEffect(() => {
     if (isStreaming) {
       fetchFrame();
-      intervalRef.current = setInterval(fetchFrame, 50);
+      intervalRef.current = setInterval(fetchFrame, 100);
       detectedIntervalRef.current = setInterval(async () => {
         try {
           const detectedRes = await getVideoDetected();
           if (detectedRes) setDetected(detectedRes);
-        } catch {}
-      }, 250);
+        } catch (err: any) {
+          console.error("Detected polling error:", err);
+        }
+      }, 500);
     }
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
       if (detectedIntervalRef.current) clearInterval(detectedIntervalRef.current);
     };
   }, [isStreaming, fetchFrame]);
+
+  // Health check and auto-reconnect
+  useEffect(() => {
+    if (!isStreaming) return;
+    
+    const healthCheckInterval = setInterval(async () => {
+      try {
+        const isHealthy = await healthCheck();
+        if (!isHealthy) {
+          console.warn("Backend health check failed");
+          setError("Backend connection unstable. Please check if backend is running.");
+        } else if (error) {
+          // Clear error if backend is healthy again
+          setError(null);
+        }
+      } catch (err: any) {
+        console.error("Health check error:", err);
+        setError(`Connection lost: ${err.message}`);
+      }
+    }, 5000); // Check every 5 seconds
+    
+    return () => clearInterval(healthCheckInterval);
+  }, [isStreaming, error]);
 
   const reset = () => {
     setFile(null);
@@ -274,6 +314,17 @@ export default function VideoProcessor() {
                   >
                     {hasViolation ? (
                       <>
+                        {/* License Plate - Big & Bold at the top */}
+                        <div className="text-center mb-2">
+                          {violation.plate_text && violation.plate_text.trim() !== "" ? (
+                            <p className="text-lg font-bold text-green-400 font-mono tracking-wider bg-green-500/10 rounded-lg py-1 px-2 inline-block">
+                              {violation.plate_text}
+                            </p>
+                          ) : (
+                            <p className="text-sm text-slate-500 italic">No plate detected</p>
+                          )}
+                        </div>
+
                         {/* Vehicle/Violation Image */}
                         {violation.crop_b64 && (
                           <div className="mb-2 flex items-center justify-center bg-slate-900/50 rounded-lg p-2" style={{ minHeight: "100px" }}>
@@ -292,28 +343,29 @@ export default function VideoProcessor() {
                             {violation.details}
                           </p>
                           
-                          {/* Vehicle Info */}
-                          {violation.vehicle_info && (
-                            <div className="text-xs space-y-0.5 mt-2">
-                              {violation.vehicle_info.type && (
-                                <p className="text-slate-300">
-                                  <span className="text-slate-400">Type:</span> <span className="text-white">{violation.vehicle_info.type}</span>
-                                </p>
-                              )}
-                              {violation.vehicle_info.color && (
-                                <p className="text-slate-300">
-                                  <span className="text-slate-400">Color:</span> 
-                                  <span className="inline-block w-3 h-3 rounded-full ml-1" style={{ backgroundColor: violation.vehicle_info.color.toLowerCase() }}></span>
-                                  <span className="text-white ml-1">{violation.vehicle_info.color}</span>
-                                </p>
-                              )}
-                              {violation.plate_text && (
-                                <p className="text-slate-300">
-                                  <span className="text-slate-400">Plate:</span> <span className="text-green-400 font-mono">{violation.plate_text}</span>
-                                </p>
-                              )}
-                            </div>
-                          )}
+                          {/* Vehicle Info - Always show when violation exists */}
+                          <div className="text-xs space-y-0.5 mt-2">
+                            {/* Vehicle Type */}
+                            {(violation.vehicle_type || violation.info) && (
+                              <p className="text-slate-300">
+                                <span className="text-slate-400">Type:</span> <span className="text-white">{violation.vehicle_type || violation.info}</span>
+                              </p>
+                            )}
+                            {/* Color */}
+                            {violation.color && (
+                              <p className="text-slate-300">
+                                <span className="text-slate-400">Color:</span> 
+                                <span className="inline-block w-3 h-3 rounded-full ml-1 align-middle" style={{ backgroundColor: violation.color.toLowerCase() }}></span>
+                                <span className="text-white ml-1">{violation.color}</span>
+                              </p>
+                            )}
+                            {/* Fallback: show info if no vehicle_type/color */}
+                            {!violation.vehicle_type && !violation.color && violation.info && (
+                              <p className="text-slate-300">
+                                <span className="text-slate-400">Info:</span> <span className="text-white">{violation.info}</span>
+                              </p>
+                            )}
+                          </div>
                         </div>
                       </>
                     ) : (

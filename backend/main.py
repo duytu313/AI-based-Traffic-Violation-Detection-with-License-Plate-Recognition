@@ -97,6 +97,7 @@ from backend.src.core.engine import LicensePlateRecognizer as LPR
 from backend.src.core.zones import ZoneConfig
 from backend.src.core.roi_detector import ROIDetector, ROIConfig
 from backend.src.core.birds_eye_detector import BirdsEyeRedLightDetector, BEVConfig
+from backend.src.core.ocr_consolidator import OCRConsolidator
 # Monkey-patch LicensePlateRecognizer for non-Streamlit env
 class LicensePlateRecognizer(LPR):
     def detect_vehicles(self, image, debug=False):
@@ -129,7 +130,7 @@ class LicensePlateRecognizer(LPR):
 
 recognizer = LicensePlateRecognizer(
     yolo_plate, yolo_vehicle, color_model, helmet_model,
-    traffic_light_model, ocr_engine, vehicle_conf=0.25, plate_conf=0.1
+    traffic_light_model, ocr_engine, vehicle_conf=0.25, plate_conf=0.5  # Increased to 0.5 to reduce false plate detections
 )
 # Lower thresholds for better detection
 recognizer.violation_conf_using_mobile = 0.15  # Lower threshold for mobile detection
@@ -138,6 +139,17 @@ recognizer.violation_conf_more_than_two = 0.40
 
 # Initialize ROI detector
 roi_detector = ROIDetector()
+
+# Initialize OCR Consolidator for frame-level plate voting
+# min_vote_frames=5: wait for at least 5 OCR reads before finalizing
+# vote_ratio=0.6: require 60% majority for consensus
+# track_timeout=10.0: remove tracks unseen for 10 seconds
+ocr_consolidator = OCRConsolidator(
+    min_vote_frames=5,
+    vote_ratio=0.6,
+    track_timeout=10.0,
+    cleanup_interval=30.0
+)
 
 print("Models loaded successfully!")
 
@@ -415,30 +427,54 @@ async def process_image(
     
     # Red light detection - ROI based (no stop line)
     red_light_violations = []
-    if enable_red_light_detection:
+    if enable_red_light_detection or enable_bev_detection:
         red_light_active = recognizer.red_light_is_active(traffic_lights)
         
-        # Use ROI polygon for violation detection on single image
-        roi_config = roi_detector.get_config()
-        if roi_config and red_light_active:
-            vehicle_list = []
-            for v in vehicles:
+        # BEV (Bird's Eye View) red light detection - also uses detect_traffic_scene
+        if enable_bev_detection:
+            # Update BEV detector with traffic light info
+            bev_detector.update_red_light(traffic_lights)
+            # Create tracked-like data from vehicles (simulate tracking for single image)
+            for idx, v in enumerate(vehicles):
                 v_bbox = v[0]
                 vx1, vy1, vx2, vy2 = v_bbox
-                vehicle_list.append({
-                    "bbox": [int(vx1), int(vy1), int(vx2), int(vy2)],
-                    "track_id": hash(tuple(v_bbox)) % 10000,
-                    "class_name": v[1],
-                    "conf": float(v[3]),
-                })
-            # min_history=1 for single image (no temporal tracking needed)
-            red_light_violations = roi_detector.process_vehicles(vehicle_list, red_light_active=True, min_history=1)
+                track_id = hash(tuple(v_bbox)) % 10000
+                class_name = v[1]
+                bev_result = bev_detector.process_vehicle(track_id, class_name, (vx1, vy1, vx2, vy2))
+                if bev_result["first_time_violation"]:
+                    current_time = datetime.now().strftime("%H:%M:%S")
+                    print(f"[{current_time}] 🔴 BEV (Image): Vehicle {bev_result['unique_key'].upper()} crossed 3D boundary at red light!")
+                    red_light_violations.append({
+                        "bbox": [vx1, vy1, vx2, vy2],
+                        "class_name": class_name,
+                        "conf": 1.0,
+                        "details": f"Red light running (BEV 3D) - {class_name}",
+                    })
         
-        # Fallback to legacy zone-based detection if no ROI configured
-        if not roi_config and red_light_active:
-            red_light_violations = recognizer.detect_red_light_violations_zone_based(
-                traffic_lights, traffic_road_users, frame=image
-            )
+        # Use ROI polygon for violation detection on single image
+        if enable_red_light_detection:
+            roi_config = roi_detector.get_config()
+            if roi_config and red_light_active:
+                vehicle_list = []
+                for v in vehicles:
+                    v_bbox = v[0]
+                    vx1, vy1, vx2, vy2 = v_bbox
+                    vehicle_list.append({
+                        "bbox": [int(vx1), int(vy1), int(vx2), int(vy2)],
+                        "track_id": hash(tuple(v_bbox)) % 10000,
+                        "class_name": v[1],
+                        "conf": float(v[3]),
+                    })
+                # min_history=1 for single image (no temporal tracking needed)
+                roi_results = roi_detector.process_vehicles(vehicle_list, red_light_active=True, min_history=1)
+                red_light_violations.extend(roi_results)
+            
+            # Fallback to legacy zone-based detection if no ROI configured
+            if not roi_config and red_light_active:
+                zone_results = recognizer.detect_red_light_violations_zone_based(
+                    traffic_lights, traffic_road_users, frame=image
+                )
+                red_light_violations.extend(zone_results)
         
         for viol in red_light_violations:
             vx1, vy1, vx2, vy2 = viol['bbox']
@@ -832,6 +868,8 @@ class CameraStream:
         self.sent_violations = set()
         self.sent_red_light_violations = set()
         self.detected_items = []
+        self.detected_track_ids = set()  # Track IDs already added to detected_items (ensure ONE entry per vehicle)
+        self.detected_track_index = {}   # track_id -> index in detected_items (for fast updates)
         self.violation_items = []
         self.red_light_items = []
         self.fps = 0.0
@@ -842,6 +880,7 @@ class CameraStream:
         self._last_frame = None          # Processed frame with overlays
         self._processing_frame = None    # Frame currently being processed
         self._processing_done = threading.Event()
+        self._violation_keys = set()  # Deduplicate violations per track+type
 
     def start(self, source, backend=cv2.CAP_ANY, target_fps=20):
         self.stop()
@@ -861,6 +900,7 @@ class CameraStream:
         self.sent_violations.clear()
         self.sent_red_light_violations.clear()
         self.detected_items.clear()
+        self.detected_track_ids.clear()  # Reset track IDs for new session
         self.violation_items.clear()
         self.red_light_items.clear()
         self.unknown_vehicle_alerts.clear()
@@ -972,6 +1012,24 @@ class CameraStream:
         dets = build_tracking_dets(vehicles, recognizer.vehicle_classes)
         tracked = self.tracker.update(frame, dets)
 
+        # ======================== OCR CONSOLIDATION ========================
+        # Feed per-frame OCR results into the consolidator for each tracked vehicle.
+        # The consolidator uses voting across frames to determine the best plate text.
+        # This prevents: duplicate DB entries, wrong OCR reads, and multiple records per vehicle.
+        for trk_id, bbox, cls_id, conf in tracked:
+            found = find_vehicle_context_by_bbox(vehicles, matched, bbox)
+            if found is not None:
+                matched_bbox, vtype, color, plate_img, plate_text = found
+                track_mem = ocr_consolidator.get_track_memory(trk_id)
+                if plate_text:
+                    track_mem.add_ocr_result(plate_text)
+                    # Store best crop for evidence
+                    if track_mem.best_vehicle_crop is None:
+                        vehicle_crop, _ = crop_vehicle_context(frame, bbox, vtype)
+                        track_mem.best_vehicle_crop = vehicle_crop
+                        track_mem.best_plate_img = plate_img
+        # ======================== END OCR CONSOLIDATION ========================
+
         # Always detect traffic lights for drawing
         camera_traffic_lights, camera_traffic_road_users = recognizer.detect_traffic_scene(frame)
 
@@ -1028,6 +1086,67 @@ class CameraStream:
             if bev_result["first_time_violation"]:
                 current_time = datetime.now().strftime("%H:%M:%S")
                 print(f"[{current_time}] 🔴 BEV: Vehicle {bev_result['unique_key'].upper()} crossed 3D boundary at red light!")
+                
+                # Add BEV violation to violation_items for display on frontend
+                try:
+                    vehicle_crop, _ = crop_vehicle_context(frame, (x1, y1, x2, y2), class_name)
+                    if vehicle_crop is not None:
+                        bev_violation_key = f"{trk_id}_RED_LIGHT_BEV"
+                        if bev_violation_key not in self.sent_violations:
+                            self.sent_violations.add(bev_violation_key)
+                            
+                            # Find vehicle info from matched plates and vehicle data
+                            found = find_vehicle_context_by_bbox(vehicles, matched, bbox)
+                            if found is not None:
+                                matched_bbox, vtype, color, plate_img, plate_text = found
+                            else:
+                                vtype = class_name
+                                color = "unknown"
+                                plate_text = ""
+                            
+                            viol_details = f"Red light running (BEV 3D) - {vtype}"
+                            
+                            # Use consolidated plate from OCR consolidator
+                            track_mem = ocr_consolidator.get_track_memory(trk_id)
+                            consolidated_plate, _ = track_mem.get_best_plate()
+                            display_plate = consolidated_plate if consolidated_plate else plate_text
+                            
+                            if display_plate:
+                                viol_info = f"🚨 RED LIGHT {display_plate} ({color} {vtype})"
+                            else:
+                                viol_info = f"🚨 RED LIGHT 3D: {bev_result['unique_key'].upper()}"
+                            # Store with full info: (crop, plate_text, vtype, details, viol_info, vtype, color, trk_id)
+                            self.violation_items.append((vehicle_crop, display_plate, "RED_LIGHT_VIOLATION", viol_details, viol_info, vtype, color, trk_id))
+                            # Also add to red_light_items for additional tracking
+                            self.red_light_items.append({
+                                "time": time.time(),
+                                "track_id": trk_id,
+                                "class_name": vtype,
+                                "bbox": (x1, y1, x2, y2),
+                                "details": viol_details,
+                                "unique_key": bev_result["unique_key"],
+                                "plate_text": plate_text,
+                                "color": color,
+                            })
+                            
+                            # Save violation to database
+                            vehicle_id = self.active_tracks.get(trk_id)
+                            if vehicle_id is None:
+                                vehicle_img_path = f"data/vehicles/track_{trk_id}_{int(time.time())}.jpg"
+                                os.makedirs("data/vehicles", exist_ok=True)
+                                cv2.imwrite(vehicle_img_path, vehicle_crop)
+                                vehicle_id = insert_vehicle_entry(trk_id, "", class_name, "unknown", vehicle_img_path, None)
+                                self.active_tracks[trk_id] = vehicle_id
+                            viol_img_path = f"data/vehicles/violation_bev_{trk_id}_{int(time.time())}.jpg"
+                            cv2.imwrite(viol_img_path, vehicle_crop)
+                            insert_violation(vehicle_id, "RED_LIGHT_VIOLATION", viol_details, viol_img_path)
+                            # Send Telegram notification
+                            threading.Thread(
+                                target=send_violation_telegram,
+                                args=(vehicle_crop, bev_result["unique_key"].upper(), "RED_LIGHT_VIOLATION", viol_details)
+                            ).start()
+                except Exception as e:
+                    print(f"[CameraStream] Error handling BEV violation: {e}")
 
         current_displayed_plate_texts = {item[2] for item in self.detected_items}
         current_displayed_violations = {f"{item[1]}_{item[2]}" for item in self.violation_items}
@@ -1063,7 +1182,7 @@ class CameraStream:
                         cv2.imwrite(speed_img_path, vehicle_crop)
                         db_insert_speed_violation(vehicle_id, trk_id, plate_text, vtype, color, speed, self.tracker.speed_limit, speed_img_path)
                         speed_details = f"Speed {speed} km/h (limit {self.tracker.speed_limit} km/h)"
-                        self.violation_items.append((vehicle_crop, plate_text, "SPEED_VIOLATION", speed_details, f"{speed} km/h"))
+                        self.violation_items.append((vehicle_crop, plate_text, "SPEED_VIOLATION", speed_details, f"{speed} km/h", vtype, color))
                         current_time = datetime.now().strftime("%H:%M:%S")
                         print(f"[{current_time}] ⚠️ SPEED: Vehicle {plate_text or trk_id} - {speed} km/h (limit {self.tracker.speed_limit} km/h)")
 
@@ -1074,16 +1193,24 @@ class CameraStream:
             if found is None:
                 continue
             matched_bbox, vtype, color, plate_img, plate_text = found
-            is_new_track = trk_id not in self.active_tracks
             vehicle_viols = vehicle_violation_map.get(tuple(matched_bbox), [])
-            if not plate_text and not vehicle_viols:
+            
+            # Get consolidated plate text from OCR consolidator (voting across frames)
+            track_mem = ocr_consolidator.get_track_memory(trk_id)
+            consolidated_plate, is_finalized = track_mem.get_best_plate()
+            display_plate = consolidated_plate if consolidated_plate else plate_text
+            
+            # Skip if no plate and no violations
+            if not display_plate and not vehicle_viols:
                 continue
-            if plate_text and is_new_track and plate_text in current_displayed_plate_texts and not vehicle_viols:
-                continue
-
-            vehicle_crop, _ = crop_vehicle_context(frame, (x1, y1, x2, y2), vtype)
-            vehicle_id = self.active_tracks.get(trk_id)
-            if is_new_track:
+            
+            # Check if this track is new to detected_items (not just active_tracks)
+            is_new_detection = trk_id not in self.detected_track_ids
+            
+            # Only add to detected_items ONCE per track (when first seen)
+            if is_new_detection:
+                self.detected_track_ids.add(trk_id)
+                vehicle_crop, _ = crop_vehicle_context(frame, (x1, y1, x2, y2), vtype)
                 vehicle_img_path = f"data/vehicles/track_{trk_id}_{int(time.time())}.jpg"
                 plate_img_path = None
                 os.makedirs("data/vehicles", exist_ok=True)
@@ -1092,38 +1219,34 @@ class CameraStream:
                 if plate_img is not None:
                     plate_img_path = f"data/plates/track_{trk_id}_{int(time.time())}.jpg"
                     cv2.imwrite(plate_img_path, plate_img)
-                vehicle_id = insert_vehicle_entry(trk_id, plate_text, vtype, color, vehicle_img_path, plate_img_path)
+                
+                # Use consolidated plate for DB entry
+                vehicle_id = insert_vehicle_entry(trk_id, display_plate, vtype, color, vehicle_img_path, plate_img_path)
                 self.active_tracks[trk_id] = vehicle_id
-
-            for vtype_v, details, _vbbox, vconf in vehicle_viols:
-                violation_key = f"{trk_id}_{vtype_v}"
-                if violation_key in self.sent_violations:
-                    continue
-                self.sent_violations.add(violation_key)
-                viol_img_path = f"data/vehicles/violation_{trk_id}_{int(time.time())}.jpg"
-                cv2.imwrite(viol_img_path, vehicle_crop)
-                insert_violation(vehicle_id, vtype_v, details, viol_img_path)
-                viol_info = f"{details} ({vconf*100:.1f}%)"
-                if f"{plate_text}_{vtype_v}" not in current_displayed_violations:
-                    self.violation_items.append((vehicle_crop, plate_text, vtype_v, details, viol_info))
+                
+                # Store best crops in consolidator
+                if track_mem.best_vehicle_crop is None:
+                    track_mem.best_vehicle_crop = vehicle_crop
+                if track_mem.best_plate_img is None and plate_img is not None:
+                    track_mem.best_plate_img = plate_img
+                
+                # Add to detected_items ONCE with consolidated plate
+                info = f"{color} {vtype} | {display_plate}"
+                self.detected_items.append((track_mem.best_vehicle_crop, track_mem.best_plate_img, display_plate, info))
+                # Store index and vote count for fast updates later
+                current_votes = track_mem.ocr_results.get(display_plate, 0)
+                self.detected_track_index[trk_id] = (len(self.detected_items) - 1, current_votes)
+                
+                # Send Telegram notification for new plate
+                if display_plate and display_plate not in self.sent_plates:
+                    self.sent_plates.add(display_plate)
                     threading.Thread(
-                        target=send_violation_telegram,
-                        args=(vehicle_crop, plate_text, vtype_v, details)
+                        target=send_telegram_notification,
+                        args=(vehicle_crop, plate_img, display_plate, vtype, color)
                     ).start()
-
-            if is_new_track and plate_text and plate_text not in self.sent_plates:
-                self.sent_plates.add(plate_text)
-                threading.Thread(
-                    target=send_telegram_notification,
-                    args=(vehicle_crop, plate_img, plate_text, vtype, color)
-                ).start()
-
-            if is_new_track:
-                info = f"{color} {vtype} | {plate_text}"
-                self.detected_items.append((vehicle_crop, plate_img, plate_text, info))
                 
                 # Check for unknown vehicle - no plate detected
-                if not plate_text or plate_text.strip() == "":
+                if not display_plate or display_plate.strip() == "":
                     alert_info = {
                         "time": time.time(),
                         "track_id": trk_id,
@@ -1134,8 +1257,48 @@ class CameraStream:
                     self.unknown_vehicle_alerts.append(alert_info)
                     if len(self.unknown_vehicle_alerts) > 50:
                         self.unknown_vehicle_alerts.pop(0)
+            else:
+                # Update existing detected_items entry with better plate if available
+                # Only update if we have a finalized BETTER plate (not just different)
+                if is_finalized and consolidated_plate:
+                    # Use direct index lookup for O(1) update
+                    idx_data = self.detected_track_index.get(trk_id)
+                    if idx_data is not None:
+                        idx, old_votes = idx_data
+                        if 0 <= idx < len(self.detected_items):
+                            old_crop, old_plate_img, old_plate_text, old_info = self.detected_items[idx]
+                            # Only update if the new plate has MORE votes than current
+                            new_votes = track_mem.ocr_results.get(consolidated_plate, 0)
+                            if consolidated_plate != old_plate_text and new_votes > old_votes:
+                                new_info = f"{color} {vtype} | {consolidated_plate}"
+                                self.detected_items[idx] = (track_mem.best_vehicle_crop or old_crop, track_mem.best_plate_img or old_plate_img, consolidated_plate, new_info)
+                                # Update stored vote count
+                                self.detected_track_index[trk_id] = (idx, new_votes)
 
-        # Remove old tracks
+            # Handle violations (deduplicate per track+type)
+            for vtype_v, details, _vbbox, vconf in vehicle_viols:
+                violation_key = f"{trk_id}_{vtype_v}"
+                if violation_key in self.sent_violations:
+                    continue
+                self.sent_violations.add(violation_key)
+                
+                vehicle_crop, _ = crop_vehicle_context(frame, (x1, y1, x2, y2), vtype)
+                viol_img_path = f"data/vehicles/violation_{trk_id}_{int(time.time())}.jpg"
+                cv2.imwrite(viol_img_path, vehicle_crop)
+                
+                vehicle_id = self.active_tracks.get(trk_id)
+                if vehicle_id:
+                    insert_violation(vehicle_id, vtype_v, details, viol_img_path)
+                
+                viol_info = f"{details} ({vconf*100:.1f}%)"
+                # Use the best consolidated plate for violations
+                self.violation_items.append((vehicle_crop, display_plate, vtype_v, details, viol_info, vtype, color))
+                threading.Thread(
+                    target=send_violation_telegram,
+                    args=(vehicle_crop, display_plate, vtype_v, details)
+                ).start()
+
+        # Remove old tracks + cleanup OCR consolidator
         current_time = time.time()
         to_remove = []
         for trk_id, veh_id in self.active_tracks.items():
@@ -1146,6 +1309,21 @@ class CameraStream:
             del self.active_tracks[trk_id]
             if trk_id in self.last_seen:
                 del self.last_seen[trk_id]
+            # Remove from detected_track_ids to allow re-detection if vehicle comes back
+            self.detected_track_ids.discard(trk_id)
+            # Remove from index mapping
+            self.detected_track_index.pop(trk_id, None)
+            # Finalize plate for this track and cleanup OCR memory
+            final_plate = ocr_consolidator.finalize_plate_for_track(trk_id)
+            if final_plate:
+                current_time_str = datetime.now().strftime("%H:%M:%S")
+                print(f"[{current_time_str}] 🏁 Track {trk_id} exited (final plate: {final_plate})")
+            ocr_consolidator.remove_track(trk_id)
+        
+        # Periodic OCR consolidator cleanup (removes stale track memories)
+        removed = ocr_consolidator.cleanup()
+        if removed > 0:
+            print(f"[OCR] Cleaned up {removed} stale track memories")
 
         # Draw ROI zone
         if roi_config is not None:
@@ -1240,7 +1418,10 @@ class VideoStreamProcessor:
         self._last_frame = None
         self.lock = threading.Lock()
         self.detected_items = []
+        self.detected_track_ids = set()  # Track IDs already added to detected_items (ensure ONE entry per vehicle)
+        self.detected_track_index = {}   # track_id -> (index, vote_count) in detected_items (for fast updates)
         self.violation_items = []
+        self._violation_keys = set()  # Track IDs of violations already recorded (per type)
 
     def start(self, video_path, config):
         self.stop()
@@ -1254,7 +1435,10 @@ class VideoStreamProcessor:
         self.frame_count = 0
         self.last_fps_time = time.time()
         self.detected_items = []
+        self.detected_track_ids.clear()  # Reset track IDs for new video
+        self.detected_track_index.clear()  # Reset index mapping
         self.violation_items = []
+        self._violation_keys.clear()
         threading.Thread(target=self._loop, daemon=True).start()
 
     def stop(self):
@@ -1322,6 +1506,20 @@ class VideoStreamProcessor:
         dets = build_tracking_dets(vehicles, recognizer.vehicle_classes)
         tracked = self.tracker.update(frame, dets)
 
+        # ======================== OCR CONSOLIDATION (Video Stream) ========================
+        for trk_id, bbox, cls_id, conf in tracked:
+            found = find_vehicle_context_by_bbox(vehicles, matched, bbox)
+            if found is not None:
+                matched_bbox, vtype, color, plate_img, plate_text = found
+                track_mem = ocr_consolidator.get_track_memory(trk_id)
+                if plate_text:
+                    track_mem.add_ocr_result(plate_text)
+                    if track_mem.best_vehicle_crop is None:
+                        vehicle_crop, _ = crop_vehicle_context(frame, bbox, vtype)
+                        track_mem.best_vehicle_crop = vehicle_crop
+                        track_mem.best_plate_img = plate_img
+        # ======================== END OCR CONSOLIDATION ========================
+
         # ROI-based red light violation detection
         roi_config = roi_detector.get_config()
         red_light_active = False
@@ -1377,8 +1575,36 @@ class VideoStreamProcessor:
             if bev_result["first_time_violation"]:
                 current_time = datetime.now().strftime("%H:%M:%S")
                 print(f"[{current_time}] 🔴 BEV (Video): Vehicle {bev_result['unique_key'].upper()} crossed 3D boundary at red light!")
+                
+                # Add BEV violation to violation_items for display on frontend
+                try:
+                    vehicle_crop, _ = crop_vehicle_context(frame, (x1, y1, x2, y2), class_name)
+                    if vehicle_crop is not None:
+                        # Find vehicle info
+                        found = find_vehicle_context_by_bbox(vehicles, matched, bbox)
+                        if found is not None:
+                            matched_bbox, vtype, color, plate_img, plate_text = found
+                        else:
+                            vtype = class_name
+                            color = "unknown"
+                            plate_text = ""
+                        
+                        # Use consolidated plate from OCR consolidator
+                        track_mem = ocr_consolidator.get_track_memory(trk_id)
+                        consolidated_plate, _ = track_mem.get_best_plate()
+                        display_plate = consolidated_plate if consolidated_plate else plate_text
+                        
+                        viol_details = f"Red light running (BEV 3D) - {vtype}"
+                        if display_plate:
+                            viol_info = f"🚨 RED LIGHT {display_plate} ({color} {vtype})"
+                        else:
+                            viol_info = f"🚨 RED LIGHT 3D: {bev_result['unique_key'].upper()}"
+                        self.violation_items.append((vehicle_crop, display_plate, "RED_LIGHT_VIOLATION", viol_details, viol_info, vtype, color))
+                except Exception as e:
+                    print(f"[VideoStream] Error handling BEV violation: {e}")
 
-        # Store detected items with crops
+        # ======================== DEDUPLICATED DETECTED ITEMS ========================
+        # Use consolidated plate text and ensure each track appears only once
         for trk_id, bbox, cls_id, conf in tracked:
             x1, y1, x2, y2 = bbox
             found = find_vehicle_context_by_bbox(vehicles, matched, bbox)
@@ -1386,14 +1612,49 @@ class VideoStreamProcessor:
                 continue
             matched_bbox, vtype, color, plate_img, plate_text = found
             vehicle_viols = vehicle_violation_map.get(tuple(matched_bbox), [])
-            if not plate_text and not vehicle_viols:
+            
+            # Get consolidated plate text from OCR consolidator (voting across frames)
+            track_mem = ocr_consolidator.get_track_memory(trk_id)
+            consolidated_plate, is_finalized = track_mem.get_best_plate()
+            display_plate = consolidated_plate if consolidated_plate else plate_text
+            
+            # Skip if no plate and no violations
+            if not display_plate and not vehicle_viols:
                 continue
-            vehicle_crop, _ = crop_vehicle_context(frame, (x1, y1, x2, y2), vtype)
-            info = f"{color} {vtype} | {plate_text}"
-            self.detected_items.append((vehicle_crop, plate_img, plate_text, info))
-            for vtype_v, details, _vbbox, vconf in vehicle_viols:
-                viol_info = f"{details} ({vconf*100:.1f}%)"
-                self.violation_items.append((vehicle_crop, plate_text, vtype_v, details, viol_info))
+            
+            # Check if this track is new to detected_items
+            is_new_detection = trk_id not in self.detected_track_ids
+            
+            if is_new_detection:
+                self.detected_track_ids.add(trk_id)
+                vehicle_crop, _ = crop_vehicle_context(frame, (x1, y1, x2, y2), vtype)
+                info = f"{color} {vtype} | {display_plate}"
+                self.detected_items.append((vehicle_crop, plate_img, display_plate, info))
+                # Store index and vote count for fast updates later
+                current_votes = track_mem.ocr_results.get(display_plate, 0)
+                self.detected_track_index[trk_id] = (len(self.detected_items) - 1, current_votes)
+            else:
+                # Update existing entry with better plate if available
+                # Only update if new plate has MORE votes than current
+                if is_finalized and consolidated_plate:
+                    idx_data = self.detected_track_index.get(trk_id)
+                    if idx_data is not None:
+                        idx, old_votes = idx_data
+                        if 0 <= idx < len(self.detected_items):
+                            old_crop, old_plate_img, old_plate_text, old_info = self.detected_items[idx]
+                            new_votes = track_mem.ocr_results.get(consolidated_plate, 0)
+                            # Only update if new plate has more votes (higher confidence)
+                            if consolidated_plate != old_plate_text and new_votes > old_votes:
+                                new_info = f"{color} {vtype} | {consolidated_plate}"
+                                self.detected_items[idx] = (track_mem.best_vehicle_crop or old_crop, plate_img, consolidated_plate, new_info)
+                                # Update stored vote count
+                                self.detected_track_index[trk_id] = (idx, new_votes)
+        
+        # Limit memory usage - keep only last 50 items
+        if len(self.detected_items) > 50:
+            self.detected_items = self.detected_items[-50:]
+        if len(self.violation_items) > 50:
+            self.violation_items = self.violation_items[-50:]
 
         # Draw
         img_draw = frame.copy()
@@ -1557,46 +1818,75 @@ async def get_video_frame():
 
 @app.get("/api/video/status")
 def video_stream_status():
-    return {
-        "running": video_stream.running,
-        "fps": round(video_stream.fps, 1),
-    }
+    try:
+        return {
+            "running": video_stream.running,
+            "fps": round(video_stream.fps, 1),
+        }
+    except Exception as e:
+        print(f"Error getting video status: {e}")
+        return {"running": False, "fps": 0.0}
 
 @app.get("/api/video/detected")
 def get_video_detected():
-    import base64
-    vehicles = []
-    for p in video_stream.detected_items[-20:]:
-        vehicle_crop, plate_img, plate_text, info = p
-        vehicle_b64 = None
-        plate_b64 = None
-        if vehicle_crop is not None and vehicle_crop.size > 0:
-            _, buf = cv2.imencode('.jpg', vehicle_crop)
-            vehicle_b64 = base64.b64encode(buf).decode('utf-8')
-        if plate_img is not None and plate_img.size > 0:
-            _, buf = cv2.imencode('.jpg', plate_img)
-            plate_b64 = base64.b64encode(buf).decode('utf-8')
-        vehicles.append({
-            "vehicle_b64": vehicle_b64,
-            "plate_b64": plate_b64,
-            "plate_text": plate_text,
-            "info": info
-        })
-    violations = []
-    for v in video_stream.violation_items[-20:]:
-        vehicle_crop, plate_text, vtype, details, viol_info = v
-        crop_b64 = None
-        if vehicle_crop is not None and vehicle_crop.size > 0:
-            _, buf = cv2.imencode('.jpg', vehicle_crop)
-            crop_b64 = base64.b64encode(buf).decode('utf-8')
-        violations.append({
-            "crop_b64": crop_b64,
-            "plate_text": plate_text,
-            "type": vtype,
-            "details": details,
-            "info": viol_info
-        })
-    return {"vehicles": vehicles, "violations": violations}
+    try:
+        import base64
+        vehicles = []
+        for p in video_stream.detected_items[-10:]:
+            vehicle_crop, plate_img, plate_text, info = p
+            vehicle_b64 = None
+            plate_b64 = None
+            if vehicle_crop is not None and vehicle_crop.size > 0:
+                _, buf = cv2.imencode('.jpg', vehicle_crop)
+                vehicle_b64 = base64.b64encode(buf).decode('utf-8')
+            if plate_img is not None and plate_img.size > 0:
+                _, buf = cv2.imencode('.jpg', plate_img)
+                plate_b64 = base64.b64encode(buf).decode('utf-8')
+            vehicles.append({
+                "vehicle_b64": vehicle_b64,
+                "plate_b64": plate_b64,
+                "plate_text": plate_text,
+                "info": info
+            })
+
+        violations = []
+        for v in video_stream.violation_items[-10:]:
+            # Handle tuple with extra info: (crop, plate_text, vtype, details, viol_info)
+            # or (crop, plate_text, vtype, details, viol_info, vehicle_type, color)
+            vehicle_crop = v[0]
+            plate_text = v[1] if len(v) > 1 else ""
+            vtype_code = v[2] if len(v) > 2 else "VIOLATION"
+            details = v[3] if len(v) > 3 else ""
+            viol_info = v[4] if len(v) > 4 else ""
+            vehicle_type = v[5] if len(v) > 5 else ""
+            color = v[6] if len(v) > 6 else ""
+            
+            # Parse vehicle_type and color from viol_info if not provided separately
+            if not vehicle_type and not color:
+                # Try to extract from viol_info pattern: "🚨 RED LIGHT ABC123 (red car)"
+                import re
+                match = re.search(r'\((\w+)\s+(\w+)\)', viol_info)
+                if match:
+                    color = match.group(1)
+                    vehicle_type = match.group(2)
+            
+            crop_b64 = None
+            if vehicle_crop is not None and vehicle_crop.size > 0:
+                _, buf = cv2.imencode('.jpg', vehicle_crop)
+                crop_b64 = base64.b64encode(buf).decode('utf-8')
+            violations.append({
+                "crop_b64": crop_b64,
+                "plate_text": plate_text,
+                "type": vtype_code,
+                "details": details,
+                "info": viol_info,
+                "vehicle_type": vehicle_type,
+                "color": color,
+            })
+        return {"vehicles": vehicles, "violations": violations}
+    except Exception as e:
+        print(f"Error getting video detected: {e}")
+        return {"vehicles": [], "violations": []}
 
 
 
@@ -1771,9 +2061,25 @@ def get_detected():
             "plate_text": plate_text,
             "info": info
         })
+
     violations = []
     for v in camera_stream.violation_items[-20:]:
-        vehicle_crop, plate_text, vtype, details, viol_info = v
+        vehicle_crop = v[0]
+        plate_text = v[1] if len(v) > 1 else ""
+        vtype = v[2] if len(v) > 2 else "VIOLATION"
+        details = v[3] if len(v) > 3 else ""
+        viol_info = v[4] if len(v) > 4 else ""
+        vehicle_type = v[5] if len(v) > 5 else ""
+        color = v[6] if len(v) > 6 else ""
+        
+        # Parse vehicle_type and color from viol_info if not provided separately
+        if not vehicle_type and not color:
+            import re
+            match = re.search(r'\((\w+)\s+(\w+)\)', viol_info)
+            if match:
+                color = match.group(1)
+                vehicle_type = match.group(2)
+        
         crop_b64 = None
         if vehicle_crop is not None and vehicle_crop.size > 0:
             _, buf = cv2.imencode('.jpg', vehicle_crop)
@@ -1783,7 +2089,9 @@ def get_detected():
             "plate_text": plate_text,
             "type": vtype,
             "details": details,
-            "info": viol_info
+            "info": viol_info,
+            "vehicle_type": vehicle_type,
+            "color": color,
         })
     return {"vehicles": vehicles, "violations": violations}
 
@@ -2157,6 +2465,14 @@ def get_speed_limit():
     """Get current speed limit."""
     limit = camera_stream.tracker.speed_limit if camera_stream.tracker else 60
     return {"speed_limit": limit}
+
+
+# ======================== OCR CONSOLIDATOR API ========================
+
+@app.get("/api/ocr-consolidator/stats")
+def get_ocr_consolidator_stats():
+    """Get OCR consolidator statistics (active tracks, finalized plates, etc.)."""
+    return ocr_consolidator.get_stats()
 
 
 # ======================== REPORTS API ========================
