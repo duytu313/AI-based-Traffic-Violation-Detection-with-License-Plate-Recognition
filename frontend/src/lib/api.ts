@@ -3,7 +3,8 @@ import type { Config, ProcessImageResponse, DBVehicle, DBViolation, Stats } from
 
 // Use relative URL so Next.js rewrites proxy API requests to backend
 // If NEXT_PUBLIC_API_URL is set, use it directly (for production/deployment)
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "";
+// Use direct backend URL for all requests to avoid proxy issues with blobs
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -171,6 +172,16 @@ export async function startVideoStream(file: File, config: any): Promise<any> {
 
 export async function stopVideoStream(): Promise<any> {
   const res = await api.post("/api/video/stop");
+  return res.data;
+}
+
+export async function pauseVideoStream(): Promise<any> {
+  const res = await api.post("/api/video/pause");
+  return res.data;
+}
+
+export async function resumeVideoStream(): Promise<any> {
+  const res = await api.post("/api/video/resume");
   return res.data;
 }
 

@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Upload, X, Video, Play, Square, Car, MousePointer2 } from "lucide-react";
-import { startVideoStream, stopVideoStream, getVideoFrame, getVideoStatus, getVideoDetected, setBEVConfig, healthCheck } from "@/lib/api";
+import { startVideoStream, stopVideoStream, getVideoFrame, getVideoStatus, getVideoDetected, setBEVConfig, pauseVideoStream, resumeVideoStream, healthCheck } from "@/lib/api";
 import type { Config, ROIPoint } from "@/lib/types";
 import ConfigPanel from "./ConfigPanel";
 import BEVEditor from "./BEVEditor";
@@ -28,6 +28,7 @@ export default function VideoProcessor() {
   const [config, setConfig] = useState<Config>(defaultConfig);
   const [loading, setLoading] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const [status, setStatus] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [frameUrl, setFrameUrl] = useState<string | null>(null);
@@ -37,6 +38,7 @@ export default function VideoProcessor() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const detectedIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const isPausedRef = useRef(false);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -47,6 +49,10 @@ export default function VideoProcessor() {
     if (!file) return;
     setLoading(true);
     setError(null);
+    setDetected(null);
+    setFrameUrl(null);
+    setIsPaused(false);
+    isPausedRef.current = false;
     try {
       await startVideoStream(file, config);
       setIsStreaming(true);
@@ -62,15 +68,82 @@ export default function VideoProcessor() {
     try {
       await stopVideoStream();
       setIsStreaming(false);
+      setIsPaused(false);
+      isPausedRef.current = false;
       setStatus(null);
       setFrameUrl(null);
       setDetected(null);
       if (intervalRef.current) clearInterval(intervalRef.current);
+      if (detectedIntervalRef.current) clearInterval(detectedIntervalRef.current);
     } catch {}
+  };
+
+  const handleDrawZone = async () => {
+    const willShow = !showBEVEditor;
+    setShowBEVEditor(willShow);
+    
+    if (willShow && isStreaming) {
+      // Pause the video when opening BEV editor
+      try {
+        await pauseVideoStream();
+        setIsPaused(true);
+        isPausedRef.current = true;
+      } catch {}
+    } else if (!willShow && isPausedRef.current) {
+      // Resume when cancelling/closing
+      try {
+        await resumeVideoStream();
+        setIsPaused(false);
+        isPausedRef.current = false;
+      } catch {}
+    }
+  };
+
+  const handleBEVSave = async (points: ROIPoint[]) => {
+    setBEVPoints(points);
+    try {
+      await setBEVConfig(points);
+    } catch {
+      // Backend unavailable - points are saved locally
+    }
+    setShowBEVEditor(false);
+    
+    // Resume video after save
+    if (isPausedRef.current) {
+      try {
+        await resumeVideoStream();
+      } catch {}
+      setIsPaused(false);
+      isPausedRef.current = false;
+    }
+  };
+
+  const handleBEVCancel = () => {
+    setShowBEVEditor(false);
+    
+    // Resume video after cancel
+    if (isPausedRef.current) {
+      resumeVideoStream().catch(() => {});
+      setIsPaused(false);
+      isPausedRef.current = false;
+    }
   };
 
   const fetchFrame = useCallback(async () => {
     if (!isStreaming) return;
+    
+    // Check backend health first
+    try {
+      const healthy = await healthCheck();
+      if (!healthy) {
+        console.error("Backend is not running");
+        setError("Backend server is not running. Please start the backend server (python backend/main.py)");
+        return;
+      }
+    } catch (err) {
+      console.error("Health check failed:", err);
+      // Don't stop streaming on health check failure, might be temporary
+    }
     
     // Fetch frame, status, and detected independently so one failure doesn't block others
     try {
@@ -82,15 +155,33 @@ export default function VideoProcessor() {
           if (prev) URL.revokeObjectURL(prev);
           return url;
         });
+      } else {
+        // Empty response means video ended - auto stop
+        console.log("Video ended, auto-stopping...");
+        handleStopStream();
+        return;
       }
     } catch (err: any) {
       console.error("Fetch frame error:", err);
-      // Don't set error immediately - it could be a temporary blip
+      // Don't stop on network errors - might be temporary
+      if (err?.message?.includes("Network Error")) {
+        setError("Cannot connect to backend. Make sure backend is running on http://localhost:8000");
+      }
     }
     
     try {
       const statusRes = await getVideoStatus();
-      if (statusRes) setStatus(statusRes);
+      if (statusRes) {
+        setStatus(statusRes);
+        // If backend says not running, auto-stop
+        if (!statusRes.running && isStreaming) {
+          console.log("Video processing ended");
+          setIsStreaming(false);
+          if (intervalRef.current) clearInterval(intervalRef.current);
+          if (detectedIntervalRef.current) clearInterval(detectedIntervalRef.current);
+          return;
+        }
+      }
     } catch (err: any) {
       console.error("Fetch status error:", err);
     }
@@ -152,6 +243,8 @@ export default function VideoProcessor() {
     setDetected(null);
     setError(null);
     setIsStreaming(false);
+    setIsPaused(false);
+    isPausedRef.current = false;
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -199,17 +292,24 @@ export default function VideoProcessor() {
                   </button>
                 )}
                 
-                {/* Draw 3D Zone Button */}
-                <button
-                  onClick={() => setShowBEVEditor(!showBEVEditor)}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
-                    showBEVEditor
-                      ? "bg-cyan-600 hover:bg-cyan-700 text-white"
-                      : "bg-slate-700 hover:bg-slate-600 text-white"
-                  }`}
-                >
-                  🛠️ {showBEVEditor ? "Drawing BEV..." : "Draw 3D Zone"}
-                </button>
+                {/* Draw 3D Zone Button - only when streaming */}
+                {isStreaming && (
+                  <button
+                    onClick={handleDrawZone}
+                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
+                      showBEVEditor
+                        ? "bg-cyan-600 hover:bg-cyan-700 text-white"
+                        : "bg-slate-700 hover:bg-slate-600 text-white"
+                    }`}
+                  >
+                    🛠️ {showBEVEditor ? "Drawing BEV..." : "Draw 3D Zone"}
+                  </button>
+                )}
+
+                {/* Pause indicator */}
+                {isPaused && (
+                  <span className="text-xs text-yellow-400 font-medium">⏸ PAUSED</span>
+                )}
               </div>
             </div>
 
@@ -219,16 +319,8 @@ export default function VideoProcessor() {
                 <BEVEditor
                   imageUrl={frameUrl || ""}
                   initialPoints={bevPoints}
-                  onSave={async (points) => {
-                    setBEVPoints(points);
-                    try {
-                      await setBEVConfig(points);
-                    } catch {
-                      // Backend unavailable - points are saved locally
-                    }
-                    setShowBEVEditor(false);
-                  }}
-                  onCancel={() => setShowBEVEditor(false)}
+                  onSave={handleBEVSave}
+                  onCancel={handleBEVCancel}
                 />
               </div>
             )}
@@ -248,6 +340,18 @@ export default function VideoProcessor() {
                     <Video className="w-16 h-16 text-slate-600 mx-auto mb-3" />
                     <p className="text-slate-400">Start video to see live stream</p>
                   </div>
+                </div>
+              )}
+              {/* Paused overlay */}
+              {isPaused && (
+                <div className="absolute inset-0 bg-black/40 flex items-center justify-center rounded-lg">
+                  <p className="text-yellow-400 font-bold text-lg">⏸ PAUSED - Drawing 3D Zone</p>
+                </div>
+              )}
+              {/* Video ended overlay */}
+              {!isStreaming && status && !status.running && frameUrl && (
+                <div className="absolute inset-0 bg-black/40 flex items-center justify-center rounded-lg">
+                  <p className="text-white font-bold text-lg">Video ended - Press Start to replay</p>
                 </div>
               )}
             </div>

@@ -1410,6 +1410,7 @@ class VideoStreamProcessor:
     def __init__(self):
         self.cap = None
         self.running = False
+        self.paused = False
         self.tracker = None
         self.config = {}
         self.fps = 0.0
@@ -1422,6 +1423,8 @@ class VideoStreamProcessor:
         self.detected_track_index = {}   # track_id -> (index, vote_count) in detected_items (for fast updates)
         self.violation_items = []
         self._violation_keys = set()  # Track IDs of violations already recorded (per type)
+        self._paused_frame = None      # Store last frame when paused
+        self._video_ended = False      # Flag for when video reaches end
 
     def start(self, video_path, config):
         self.stop()
@@ -1429,6 +1432,8 @@ class VideoStreamProcessor:
         if not self.cap.isOpened():
             raise RuntimeError("Cannot open video")
         self.running = True
+        self.paused = False
+        self._video_ended = False
         self.config = config
         self.tracker = ByteTrackVehicleTracker(recognizer)
         self.fps = 0.0
@@ -1439,13 +1444,27 @@ class VideoStreamProcessor:
         self.detected_track_index.clear()  # Reset index mapping
         self.violation_items = []
         self._violation_keys.clear()
+        self._paused_frame = None
         threading.Thread(target=self._loop, daemon=True).start()
 
     def stop(self):
         self.running = False
-        if self.cap:
-            self.cap.release()
-            self.cap = None
+        self.paused = False
+        # Don't release cap here - it causes threading issues on Windows
+        # Let it be released in the loop thread or garbage collected
+        self.cap = None
+
+    def pause(self):
+        """Pause the video stream - freeze on current frame."""
+        if self.running and not self.paused:
+            self.paused = True
+            print("[VideoStream] Paused")
+
+    def resume(self):
+        """Resume the video stream from current position."""
+        if self.running and self.paused:
+            self.paused = False
+            print("[VideoStream] Resumed")
 
     def _loop(self):
         target_fps = getattr(self, 'target_fps', 20)
@@ -1453,12 +1472,40 @@ class VideoStreamProcessor:
         process_interval = 1.0 / min(target_fps, 10)  # Process detection at max 10 FPS
         last_frame_time = 0
         last_process_time = 0
+        paused_frame_sent = False
         
         while self.running and self.cap and self.cap.isOpened():
-            ret, frame = self.cap.read()
-            if not ret:
-                self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            # If paused, just keep the last frame and sleep
+            if self.paused:
+                if not paused_frame_sent and self._last_frame is not None:
+                    with self.lock:
+                        self._last_frame = self._paused_frame if self._paused_frame is not None else self._last_frame
+                    paused_frame_sent = True
+                time.sleep(0.05)
                 continue
+            paused_frame_sent = False
+            
+            try:
+                ret, frame = self.cap.read()
+            except Exception as e:
+                print(f"[VideoStream] Read error (video likely ended): {e}")
+                ret = False
+                frame = None
+            
+            if not ret:
+                # Video ended - auto-stop
+                print("[VideoStream] Video ended, auto-stopping...")
+                self._video_ended = True
+                self.running = False
+                # Release cap in this thread to avoid threading issues
+                try:
+                    if self.cap:
+                        self.cap.release()
+                except Exception as e:
+                    print(f"[VideoStream] Release error (non-critical): {e}")
+                self.cap = None
+                # Keep the last frame so frontend can still display it
+                break
             
             now = time.time()
             # Cap display at target_fps (20 FPS)
@@ -1469,6 +1516,9 @@ class VideoStreamProcessor:
             # Only run detection at reduced rate
             if now - last_process_time >= process_interval:
                 self._process_frame(frame)
+                # Store a copy of this frame for pause state
+                with self.lock:
+                    self._paused_frame = self._last_frame.copy() if self._last_frame is not None else frame.copy()
                 last_process_time = now
                 continue  # Already have frame from process_frame
             
@@ -1750,7 +1800,13 @@ class VideoStreamProcessor:
 
     def get_last_frame(self):
         with self.lock:
-            return self._last_frame
+            # If video ended, still return the last frame (don't return None)
+            if self._last_frame is not None:
+                return self._last_frame
+            # If video ended and we have a paused frame, return that
+            if self._paused_frame is not None:
+                return self._paused_frame
+            return None
 
 
 video_stream = VideoStreamProcessor()
@@ -1803,29 +1859,45 @@ async def stop_video_stream():
     video_stream.stop()
     return {"status": "stopped"}
 
+@app.post("/api/video/pause")
+async def pause_video_stream():
+    video_stream.pause()
+    return {"status": "paused"}
+
+@app.post("/api/video/resume")
+async def resume_video_stream():
+    video_stream.resume()
+    return {"status": "resumed"}
+
 @app.get("/api/video/frame")
 async def get_video_frame():
-    frame = video_stream.get_last_frame()
-    if frame is None:
-        # Return empty response instead of 404 to avoid frontend polling errors
+    try:
+        frame = video_stream.get_last_frame()
+        if frame is None:
+            # Return empty response instead of 404 to avoid frontend polling errors
+            return Response(content=b"", media_type="image/jpeg")
+        _, buffer = cv2.imencode('.jpg', frame)
+        return StreamingResponse(
+            iter([buffer.tobytes()]),
+            media_type="image/jpeg",
+            headers={"Cache-Control": "no-cache"}
+        )
+    except Exception as e:
+        print(f"Error getting video frame: {e}")
         return Response(content=b"", media_type="image/jpeg")
-    _, buffer = cv2.imencode('.jpg', frame)
-    return StreamingResponse(
-        iter([buffer.tobytes()]),
-        media_type="image/jpeg",
-        headers={"Cache-Control": "no-cache"}
-    )
 
 @app.get("/api/video/status")
 def video_stream_status():
     try:
         return {
             "running": video_stream.running,
+            "paused": getattr(video_stream, 'paused', False),
             "fps": round(video_stream.fps, 1),
+            "video_ended": getattr(video_stream, '_video_ended', False),
         }
     except Exception as e:
         print(f"Error getting video status: {e}")
-        return {"running": False, "fps": 0.0}
+        return {"running": False, "paused": False, "fps": 0.0, "video_ended": False}
 
 @app.get("/api/video/detected")
 def get_video_detected():
@@ -1886,6 +1958,8 @@ def get_video_detected():
         return {"vehicles": vehicles, "violations": violations}
     except Exception as e:
         print(f"Error getting video detected: {e}")
+        import traceback
+        traceback.print_exc()
         return {"vehicles": [], "violations": []}
 
 
